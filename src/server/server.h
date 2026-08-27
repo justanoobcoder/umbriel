@@ -2,6 +2,7 @@
 #include "core/animation.h"
 #include "core/dirty.h"
 #include "input/modifier_tap.h"
+#include "scene/border_rect.h"
 #include "server/focus.h"
 #include "view/registry.h"
 
@@ -223,7 +224,7 @@ namespace umbriel {
     void relayoutBanner();
     void relayoutCheatsheet();
     void relayoutQuitConfirm();
-    void spawn(const char* command);
+    void spawn(const char* command, const char* description = nullptr);
     void handleConfigReload();
     // Re-evaluate application idle inhibitors after a surface's presentation
     // visibility changes.
@@ -320,7 +321,7 @@ namespace umbriel {
       std::string style = "fade";
     };
     void animateCloseSnapshot(
-        Output* output, wlr_scene_tree* tree, std::vector<std::pair<wlr_scene_rect*, std::array<float, 4>>> rects,
+        Output* output, wlr_scene_tree* tree, std::vector<BorderSnapshot> borders,
         std::optional<CloseSnapshotOverrides> overrides = std::nullopt
     );
 
@@ -489,8 +490,7 @@ namespace umbriel {
     class CloseSnapshot : public Animatable {
     public:
       CloseSnapshot(
-          Server& server, Output* output, wlr_scene_tree* tree,
-          std::vector<std::pair<wlr_scene_rect*, std::array<float, 4>>> rects, int durationMs,
+          Server& server, Output* output, wlr_scene_tree* tree, std::vector<BorderSnapshot> borders, int durationMs,
           const AnimationCurve& curve, std::string_view style
       );
       ~CloseSnapshot() override;
@@ -509,7 +509,7 @@ namespace umbriel {
       int m_origX = 0;
       int m_origY = 0;
       std::vector<std::pair<wlr_scene_buffer*, float>> m_buffers;
-      std::vector<std::pair<wlr_scene_rect*, std::array<float, 4>>> m_rects;
+      std::vector<BorderSnapshot> m_borders;
     };
     // unique_ptr because the registry holds raw pointers to these: a vector of
     // values would move them out from under it on reallocation.
@@ -544,6 +544,14 @@ namespace umbriel {
     // removes itself when it runs, so a non-null pointer means "already queued".
     wl_event_source* m_ipcWindowsIdle = nullptr;
     wl_event_source* m_displacedRestoreIdle = nullptr;
+    struct DisplacedWorkspaceSelection {
+      std::string outputName;
+      std::string workspaceName;
+      size_t workspaceIndex = 0;
+    };
+    // Output objects do not survive physical hotplug, so selected workspaces
+    // wait here until the output with the same stable name returns.
+    std::vector<DisplacedWorkspaceSelection> m_displacedWorkspaceSelections;
     // Name to give the next output the backend hands over, set while createHeadlessOutput is adding one.
     std::string m_pendingOutputName;
     // SIGINT / SIGTERM, delivered on the event loop rather than in a signal

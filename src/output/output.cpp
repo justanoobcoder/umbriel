@@ -61,6 +61,7 @@ namespace umbriel {
     applyCursorConfig();
     (void)applyConfiguredState();
     m_sceneOutput = wlr_scene_output_create(m_server->scene(), m_output);
+    wlr_scene_output_set_direct_scanout_enabled(m_sceneOutput, configuredDirectScanoutEnabled());
     updateSceneSdrWhite();
     if (configuredEnabled()) {
       wlr_output_layout_output* layoutOutput = addToLayout();
@@ -78,9 +79,28 @@ namespace umbriel {
     arrangeLayers();
     m_workspaceGroup = std::make_unique<WorkspaceGroup>(*m_server, *this);
   }
+
   bool Output::configuredEnabled() const {
     const OutputRule* rule = findRule(m_output->name);
     return rule == nullptr || rule->enabled;
+  }
+
+  wlr_box Output::layoutBox() const {
+    wlr_box box{.x = m_arrangedLayoutX, .y = m_arrangedLayoutY, .width = 0, .height = 0};
+    wlr_output_effective_resolution(m_output, &box.width, &box.height);
+    if (const wlr_output_layout_output* layoutOutput = wlr_output_layout_get(m_server->outputLayout(), m_output)) {
+      box.x = layoutOutput->x;
+      box.y = layoutOutput->y;
+    }
+    return box;
+  }
+
+  wlr_box Output::usableArea() const {
+    wlr_box area = m_localUsableArea;
+    const wlr_box box = layoutBox();
+    area.x += box.x;
+    area.y += box.y;
+    return area;
   }
 
   HdrMode Output::hdrMode() const {
@@ -106,6 +126,11 @@ namespace umbriel {
   float Output::configuredSdrWhite() const {
     const OutputRule* rule = findRule(m_output->name);
     return rule != nullptr ? rule->sdrWhite : 203.0F;
+  }
+
+  bool Output::configuredDirectScanoutEnabled() const {
+    const OutputRule* rule = findRule(m_output->name);
+    return rule == nullptr || rule->directScanout;
   }
 
   bool Output::configuredTearingAllowed() const {
@@ -164,6 +189,10 @@ namespace umbriel {
     m_tearingFallbackReason.clear();
     m_tearingRecovery.reset();
     wlr_output_schedule_frame(m_output);
+  }
+
+  void Output::applyDirectScanoutConfig() {
+    wlr_scene_output_set_direct_scanout_enabled(m_sceneOutput, configuredDirectScanoutEnabled());
   }
 
   void Output::setHdrFallbackReason(std::string_view reason) {
@@ -603,10 +632,10 @@ namespace umbriel {
     // Workspace destructors reparent leftover views onto the server trees, so the group has to go before the roots it
     // hangs under.
     m_workspaceGroup.reset();
-    for (uint32_t layer = 0; layer < kLayerCount; ++layer) {
-      if (m_layerTrees[layer] != nullptr) {
-        wlr_scene_node_destroy(&m_layerTrees[layer]->node);
-        m_layerTrees[layer] = nullptr;
+    for (wlr_scene_tree*& layerTree : m_layerTrees) {
+      if (layerTree != nullptr) {
+        wlr_scene_node_destroy(&layerTree->node);
+        layerTree = nullptr;
       }
     }
     if (m_popupTree != nullptr) {
@@ -701,16 +730,16 @@ namespace umbriel {
       wlr_scene_tree_set_clip(root, &outputBox);
     }
 
-    // Usable area is stored in layout coordinates for xdg placement.
-    m_usableArea = {
-        .x = m_sceneOutput->x + usableArea.x,
-        .y = m_sceneOutput->y + usableArea.y,
-        .width = usableArea.width,
-        .height = usableArea.height,
-    };
+    // Keep the usable area output-local so layout moves take effect immediately,
+    // without waiting for the next layer arrangement.
+    m_localUsableArea = usableArea;
+    m_arrangedLayoutX = m_sceneOutput->x;
+    m_arrangedLayoutY = m_sceneOutput->y;
 
+    const wlr_box layoutUsableArea = this->usableArea();
     kLog.debug(
-        "{} usable={}x{}+{}+{}", m_output->name, m_usableArea.width, m_usableArea.height, m_usableArea.x, m_usableArea.y
+        "{} usable={}x{}+{}+{}", m_output->name, layoutUsableArea.width, layoutUsableArea.height, layoutUsableArea.x,
+        layoutUsableArea.y
     );
     if (m_workspaceGroup != nullptr && m_workspaceGroup->active() != nullptr) {
       m_workspaceGroup->active()->markArrange(false);

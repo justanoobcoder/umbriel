@@ -6,9 +6,15 @@ headless outputs use `HEADLESS-1`.
 
 When an output is disconnected or disabled through configuration, Umbriel moves
 its windows to the active workspace on another enabled output, and moves them
-back to the workspace they came from when it returns. Scratchpad windows move
-with that output assignment and return with it too. If no enabled output
-remains, windows stay without a workspace until one becomes available.
+back to the workspace they came from when it returns. The output also returns
+to its previously active workspace. Floating and pinned windows retain their
+full-output-relative positions even when a panel recreates its exclusive zone
+after the output. Scratchpad windows move with their output assignment and
+return with it too. Tiled windows retain their order, grouping, split ratios,
+and sizes in the scrolling, dwindle, and master layouts. Taskbars and docks
+continue to associate windows on inactive workspaces with the restored output
+without requiring each workspace to be visited. If no enabled output remains,
+windows stay without a workspace until one becomes available.
 
 Run `umbriel outputs` inside a session to list connector names and modes.
 
@@ -19,6 +25,7 @@ position = [0, 0]
 scale = 1.25
 vrr = "fullscreen"
 tearing = true
+direct_scanout = false
 workspaces = 5
 ```
 
@@ -32,6 +39,7 @@ workspaces = 5
 | `scale` | float | (auto) | Output scale (0.25-4.0). |
 | `vrr` | string | `"disabled"` | Variable refresh rate policy: `"disabled"`, `"always"`, or `"fullscreen"`. |
 | `tearing` | bool | `false` | Permit asynchronous page flips for eligible fullscreen windows on this output. |
+| `direct_scanout` | bool | `true` | Permit eligible client buffers to bypass composition on this output. Set to `false` to always composite. |
 | `hdr` | string | `"off"` | HDR policy: `"off"`, `"on"`, `"auto"`, or `"fullscreen"`. |
 | `sdr_white` | float | `203` | SDR reference white in cd/m2 while the output is in HDR mode (80-1000). |
 | `workspaces` | int, string array, or `"dynamic"` | `"dynamic"` | Dynamic numbered workspaces, a static count from 1 to 64, or a static ordered list of 1 to 64 names. |
@@ -41,6 +49,28 @@ workspaces = 5
 
 `normal`, `90`, `180`, `270`, `flipped`, `flipped-90`, `flipped-180`,
 `flipped-270`.
+
+### Direct scanout
+
+Direct scanout lets an eligible fullscreen client buffer be presented without
+first rendering it into Umbriel's composited output buffer. Disable it for an
+output when a fullscreen application causes graphical corruption, black
+frames, flicker, or driver-specific presentation problems:
+
+```toml
+[output.DP-1]
+direct_scanout = false
+```
+
+The setting applies on reload. Changing it fully damages and schedules that
+output. Setting it to `false` returns an active direct scanout to composition on
+the next frame; setting it to `true` makes eligible future frames candidates
+for direct scanout. Disabling it can increase GPU use and power consumption
+while fullscreen content is visible.
+
+`WLR_SCENE_DISABLE_DIRECT_SCANOUT=1` is a process-wide startup override. When
+set, it disables direct scanout on every output regardless of
+`direct_scanout = true`.
 
 ### Variable refresh rate
 
@@ -135,6 +165,19 @@ they publish HDR metadata. With Proton-CachyOS, use `DXVK_HDR=1` instead of
 `PROTON_ENABLE_HDR=1`. Other Proton variants may behave differently; follow the
 documentation for the selected compatibility tool.
 
+A Steam launch option scopes the variable to one game. To publish it to newly
+started systemd session services and their applications instead, configure it
+for the Umbriel session:
+
+```toml
+[environment]
+PROTON_ENABLE_WAYLAND = "1"
+DXVK_HDR = "1"
+```
+
+This requires an Umbriel restart. Fully exit and relaunch Steam afterward,
+because an existing Steam process keeps the environment with which it started.
+
 The `"fullscreen"` policy activates HDR before a client supplies color
 metadata. This can break the discovery loop for native Wayland games that only
 offer HDR after seeing an HDR output. It also activates for fullscreen SDR
@@ -170,8 +213,11 @@ Set `enabled = false` on an output section to turn the monitor off. The
 connector is powered down, the output leaves the output layout, and its
 workspaces no longer appear in the overview. The output's workspaces and their
 windows are preserved, so setting `enabled = true` back (or removing the key)
-restores the monitor exactly as it was. A disabled output is never picked as a
-focus, placement, or layer-surface target.
+restores the monitor exactly as it was. Tiled windows retain their order,
+grouping, split ratios, and sizes in the scrolling, dwindle, and master layouts.
+Its active workspace and the positions of floating, pinned, and scratchpad
+windows return too. A disabled output is never picked as a focus, placement, or
+layer-surface target.
 
 ```toml
 [output.HDMI-A-1]
@@ -219,6 +265,10 @@ the adjacent monitor's active workspace. `workspace-move-to-output-*` instead
 creates a new workspace on the adjacent monitor and moves every window of the
 active workspace into it, preserving column order and widths. See
 [Actions](actions.md) for the full list and their exact semantics.
+
+Whole-column moves between scrolling workspaces retain member order, width,
+full-width restore state, and stacked row proportions. A destination using the
+dwindle layout flattens the moved stack into ordered single-window columns.
 
 Direction is determined from output centers in logical layout coordinates.
 Small overlaps caused by fractional scaling and coordinate rounding therefore

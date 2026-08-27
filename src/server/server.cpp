@@ -35,7 +35,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/wait.h>
 #include <unistd.h>
 
 namespace umbriel {
@@ -61,29 +60,50 @@ namespace umbriel {
       return true;
     }
 
+    std::string shellQuote(std::string_view value) {
+      std::string quoted("'");
+      for (const char character : value) {
+        if (character == '\'') {
+          quoted += "'\\''";
+        } else {
+          quoted += character;
+        }
+      }
+      quoted += '\'';
+      return quoted;
+    }
+
     void applyConfiguredEnvironment() {
       for (const auto& [name, value] : config().environment.variables) {
-        if (name.empty()) {
-          continue;
-        }
         if (setenv(name.c_str(), value.c_str(), 1) != 0) {
           kLog.warn("failed to export environment variable {}", name);
         }
       }
     }
 
-    void synchronizeSessionEnvironment() {
-      constexpr std::string_view command =
-          "variables='WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE "
-          "UMBRIEL_SOCKET'; "
-          "if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then "
-          "systemctl --user import-environment $variables; fi; "
-          "if command -v dbus-update-activation-environment >/dev/null 2>&1; then "
-          "dbus-update-activation-environment $variables; fi";
-      const int status = std::system(command.data());
-      if (status == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        kLog.warn("failed to synchronize the session environment");
+    std::string sessionEnvironmentCommand() {
+      std::string configuredAssignments;
+      for (const auto& [name, value] : config().environment.variables) {
+        configuredAssignments += ' ';
+        configuredAssignments += shellQuote(name + "=" + value);
       }
+
+      const std::string publishConfigured =
+          configuredAssignments.empty() ? "" : " && systemctl --user set-environment" + configuredAssignments;
+      std::string command =
+          "variables='WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE "
+          "UMBRIEL_SOCKET'; systemd_ready=false; "
+          "if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then "
+          "if systemctl --user import-environment $variables";
+      command += publishConfigured;
+      command += "; then systemd_ready=true; else "
+                 "echo 'umbriel: failed to publish the session environment' >&2; fi; fi; "
+                 "if command -v dbus-update-activation-environment >/dev/null 2>&1; then "
+                 "dbus-update-activation-environment $variables || "
+                 "echo 'umbriel: failed to update the D-Bus activation environment' >&2; fi; "
+                 "if $systemd_ready; then systemctl --user start --no-block umbriel-session.target || "
+                 "echo 'umbriel: failed to start the systemd session target' >&2; fi";
+      return command;
     }
 
   } // namespace
@@ -520,27 +540,22 @@ namespace umbriel {
       setenv("XCURSOR_THEME", cursorCfg.theme.c_str(), 1);
     }
 
-    // Export user-defined environment variables from config.
-    applyConfiguredEnvironment();
-
-    // Start xwayland-satellite before autostart so X11 apps in autostart can
-    // connect (there is still a small race against satellite's socket bind).
+    // Start xwayland-satellite before session services and autostart so X11
+    // applications can connect. The supervisor applies configured values in
+    // the child while this process retains its session-control environment.
     if (config().general.xwayland) {
       m_xwayland = std::make_unique<XwaylandSupervisor>(wl_display_get_event_loop(m_display), m_socketName);
       m_xwayland->start();
     }
 
-    // Synchronize before starting the target so its services inherit the
-    // compositor environment rather than stale login manager values.
+    // Fork session synchronization before applying configured values locally.
+    // Its child keeps the inherited PATH and bus addresses, while the target
+    // receives the explicit configured assignments before it starts.
     if (!m_nested) {
-      synchronizeSessionEnvironment();
-      // Notify systemd that the graphical session is ready so user services
-      // gated on graphical-session.target (xdg-desktop-portal, etc.) can start.
-      spawn(
-          "if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; "
-          "then systemctl --user start --no-block umbriel-session.target; fi"
-      );
+      const std::string command = sessionEnvironmentCommand();
+      spawn(command.c_str(), "session environment synchronization");
     }
+    applyConfiguredEnvironment();
     if (startupCmd != nullptr) {
       spawn(startupCmd);
     }
@@ -658,7 +673,7 @@ namespace umbriel {
     return m_shellLayerTrees[layer];
   }
 
-  void Server::spawn(const char* command) {
+  void Server::spawn(const char* command, const char* description) {
     if (m_socketName.empty()) {
       wlr_log(WLR_ERROR, "cannot spawn before the Wayland socket exists");
       return;
@@ -684,7 +699,10 @@ namespace umbriel {
       _exit(1);
     }
 
-    wlr_log(WLR_INFO, "spawned '%s' on WAYLAND_DISPLAY=%s", command, m_socketName.c_str());
+    wlr_log(
+        WLR_INFO, "spawned '%s' on WAYLAND_DISPLAY=%s", description == nullptr ? command : description,
+        m_socketName.c_str()
+    );
   }
 
   void Server::updateSeatCapabilities() { m_seat->updateCapabilities(!m_keyboards.empty(), !m_touchDevices.empty()); }
@@ -698,11 +716,10 @@ namespace umbriel {
   }
 
   Server::CloseSnapshot::CloseSnapshot(
-      Server& server, Output* output, wlr_scene_tree* tree,
-      std::vector<std::pair<wlr_scene_rect*, std::array<float, 4>>> rects, int durationMs, const AnimationCurve& curve,
-      std::string_view style
+      Server& server, Output* output, wlr_scene_tree* tree, std::vector<BorderSnapshot> borders, int durationMs,
+      const AnimationCurve& curve, std::string_view style
   )
-      : m_server(&server), m_tree(tree), m_output(output), m_rects(std::move(rects)) {
+      : m_server(&server), m_tree(tree), m_output(output), m_borders(std::move(borders)) {
     if (m_tree != nullptr) {
       m_origX = m_tree->node.x;
       m_origY = m_tree->node.y;
@@ -745,10 +762,12 @@ namespace umbriel {
     for (auto& [buffer, baseOpacity] : m_buffers) {
       wlr_scene_buffer_set_opacity(buffer, std::clamp(baseOpacity * alpha, 0.0F, 1.0F));
     }
-    for (auto& [rect, base] : m_rects) {
-      float color[4];
-      premultiplied(color, base, alpha);
-      wlr_scene_rect_set_color(rect, color);
+    for (auto& border : m_borders) {
+      float innerColor[4];
+      float outerColor[4];
+      premultiplied(innerColor, border.innerColor, alpha);
+      premultiplied(outerColor, border.outerColor, alpha);
+      wlr_scene_border_set_colors(border.node, innerColor, outerColor);
     }
 
     if (m_tree != nullptr && movedY) {
@@ -820,7 +839,7 @@ namespace umbriel {
   }
 
   void Server::animateCloseSnapshot(
-      Output* output, wlr_scene_tree* tree, std::vector<std::pair<wlr_scene_rect*, std::array<float, 4>>> rects,
+      Output* output, wlr_scene_tree* tree, std::vector<BorderSnapshot> borders,
       std::optional<CloseSnapshotOverrides> overrides
   ) {
     int durationMs = 0;
@@ -846,7 +865,7 @@ namespace umbriel {
       return;
     }
 
-    auto snapshot = std::make_unique<CloseSnapshot>(*this, output, tree, std::move(rects), durationMs, curve, style);
+    auto snapshot = std::make_unique<CloseSnapshot>(*this, output, tree, std::move(borders), durationMs, curve, style);
     registerAnimatable(snapshot.get());
     m_closeSnapshots.push_back(std::move(snapshot));
   }

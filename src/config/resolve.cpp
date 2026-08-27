@@ -55,10 +55,13 @@ namespace umbriel {
         resolved.gap = *overrides.gap;
       }
       if (overrides.scrolling.defaultWidthFraction) {
-        resolved.scrolling.defaultWidthFraction = *overrides.scrolling.defaultWidthFraction;
+        resolved.scrolling.defaultWidthFraction = overrides.scrolling.defaultWidthFraction;
       }
       if (overrides.scrolling.centerUnderfullStrip) {
         resolved.scrolling.centerUnderfullStrip = *overrides.scrolling.centerUnderfullStrip;
+      }
+      if (overrides.dwindle.preserveSplit) {
+        resolved.dwindle.preserveSplit = *overrides.dwindle.preserveSplit;
       }
       if (overrides.scrolling.direction) {
         resolved.scrolling.direction = *overrides.scrolling.direction;
@@ -233,6 +236,7 @@ namespace umbriel {
     resolved.scrolling.defaultWidthFraction = config.layout.scrolling.defaultWidthFraction;
     resolved.scrolling.centerUnderfullStrip = config.layout.scrolling.centerUnderfullStrip;
     resolved.scrolling.direction = config.layout.scrolling.direction;
+    resolved.dwindle.preserveSplit = config.layout.dwindle.preserveSplit;
     resolved.master.defaultWidthFraction = config.layout.master.defaultWidthFraction;
     resolved.master.position = config.layout.master.position;
     const int borderWidth = config.appearance.totalBorderWidth();

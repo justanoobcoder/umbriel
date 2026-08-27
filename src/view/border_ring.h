@@ -8,19 +8,26 @@
 
 namespace umbriel {
 
-  // A rounded border is one outer rectangle with the window punched out of its
-  // center. Both curves share a center, so their radii differ by the thickness.
+  // Raster bounds, content hole, and nested radii for a single-pass border.
   struct BorderRing {
     wlr_box box;
-    fx_corner_radii outer;
     wlr_box hole;
     fx_corner_radii inner;
+    fx_corner_radii seam;
+    fx_corner_radii outer;
   };
 
-  // A ring drawn outside a rounded rectangle has to grow its own radius by the
-  // ring's thickness to stay concentric. A square window stays square.
-  [[nodiscard]] constexpr int expandedRadius(int radius, int thickness) { return radius > 0 ? radius + thickness : 0; }
+  // Smoothly reduces a positive outer radius without collapsing an inset contour to square.
+  [[nodiscard]] constexpr int nestedRadius(int radius, int inset) {
+    if (radius <= 0) {
+      return 0;
+    }
+    const int denominator = radius + inset;
+    const int rounded = (radius * radius + denominator / 2) / denominator;
+    return rounded > 0 ? rounded : 1;
+  }
 
-  [[nodiscard]] BorderRing makeBorderRing(int contentWidth, int contentHeight, int radius, int thickness);
+  [[nodiscard]] BorderRing
+  makeBorderRing(int contentWidth, int contentHeight, int outerRadius, int innerWidth, int outerWidth);
 
 } // namespace umbriel

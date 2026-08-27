@@ -19,6 +19,11 @@ show_cheatsheet = true         # show keybinds overlay on startup
 focus_on_activate = false      # activation requests mark urgent without stealing focus
 honor_restored_maximize = false # let apps restore their saved maximized state
 
+# Applied only at session startup. Native sessions also publish these values to
+# newly started systemd session services and applications they launch. D-Bus
+# receives only graphical connection variables. Nested sessions do not modify the
+# host session environment. Without systemd, direct Umbriel children still inherit
+# the values. Relaunch applications that were already running.
 # [environment]
 # GTK_THEME = "Adwaita:dark"
 # QT_QPA_PLATFORMTHEME = "qt5ct"
@@ -104,7 +109,7 @@ curve = "easeout"
 prefer_no_csd = true
 border_width = 2               # 0-100
 outer_border_width = 0         # 0-100
-corner_radius = 10             # 0-100
+corner_radius = 10             # 0-100, radius of the final decorated outer edge
 drag_opacity = 0.75
 # border_focused = "#7AA3FFFF"
 # border_unfocused = "#292933FF"
@@ -165,6 +170,7 @@ action = "spawn:notify-send 'Bottom right'"
 
 [layout]
 mode = "scrolling"             # "scrolling", "dwindle", or "master"
+# Inspect every workspace's effective mode with `umbriel workspaces --json`.
 gap = 8                        # 0-500
 width_presets = [0.333, 0.5, 0.667] # shared by scrolling, dwindle, and master
 
@@ -174,16 +180,21 @@ width_presets = [0.333, 0.5, 0.667] # shared by scrolling, dwindle, and master
 default_width_fraction = 0.5  # remove to let clients choose their initial width
 center_underfull_strip = true  # center the strip whenever it is narrower than the viewport
 
+
+[layout.dwindle]
+# Keep each split direction fixed after it is created.
+# preserve_split = false
 [layout.master]
 position = "left"              # "left" or "right"
 default_width_fraction = 0.55  # 0.1-0.9
 
-# Workspace layout overrides (see docs/user/outputs.md#workspace-rules)
+# Workspace layout overrides (see docs/user/workspaces.md#workspace-rules)
 # [[workspace]]
 # name = "chat"
 # layout.mode = "dwindle"
 # layout.gap = 4
 # layout.scrolling.center_underfull_strip = false
+# layout.dwindle.preserve_split = true
 
 # Outputs (see docs/user/outputs.md) ----------------------------------------
 
@@ -193,9 +204,10 @@ default_width_fraction = 0.55  # 0.1-0.9
 # scale = 1.25
 # vrr = "fullscreen"            # "disabled" (default), "always", or "fullscreen"
 # tearing = true                 # allow eligible fullscreen clients to request tearing
+# direct_scanout = true           # false forces composition on this output
 # hdr = "auto"                  # "off", "on", metadata-driven "auto", or any-app "fullscreen"
 # sdr_white = 203                # SDR reference white in cd/m2 while HDR is active
-# enabled = true                # false powers the monitor off and removes it from the desktop
+# enabled = true                # false removes it; re-enabling restores windows, layout, active workspace, and taskbar entries
 # Dynamic workspaces are the default; use a count or name list for static workspaces.
 # workspaces = 5
 
@@ -275,6 +287,7 @@ follows_mouse = false
 "Mod+Space" = "scratchpad-toggle"
 "Mod+Ctrl+Space" = "window-restore-from-scratchpad"
 "Mod+Tab" = "scratchpad-focus-next"
+# Scratchpads return to their original output and position after temporary output loss.
 # Add `:DP-1` to any scratchpad action to target that output from anywhere.
 # "Mod+0" = "scratchpad-toggle:DP-1"
 # "Mod+Shift+0" = "window-move-to-scratchpad:DP-1"
@@ -284,6 +297,9 @@ follows_mouse = false
 "Mod+O" = "overview-toggle"
 # "Mod+Space" is taken above; pick a free chord for layout switching.
 # "Mod+Shift+K" = "keyboard-layout-next"
+# Submaps can nest; entry binds should not repeat. Inspect the active layer with `umbriel submap`.
+# "Mod+R" = { action = "submap:resize", repeat = false }
+# "submap[resize],Escape" = "submap:reset"
 
 # Output, workspace, and window movement actions.
 # "Mod+Home" = "column-focus-first"
@@ -296,6 +312,9 @@ follows_mouse = false
 # "Mod+Shift+Comma" = "window-move-to-workspace-previous"
 # "Mod+Shift+Period" = "window-move-to-workspace-next"
 # "Mod+Shift+Tab" = "window-move-to-workspace-back-and-forth"
+# "Mod+Ctrl+Page_Up" = "column-move-to-workspace-previous"
+# "Mod+Ctrl+Page_Down" = "column-move-to-workspace-next"
+# "Mod+Ctrl+1" = "column-move-to-workspace:1"
 # "Mod+Ctrl+Comma" = "workspace-move-up"
 # "Mod+Ctrl+Period" = "workspace-move-down"
 # "Mod+Ctrl+H" = "output-focus-left"

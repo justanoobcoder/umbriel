@@ -224,6 +224,9 @@ UMBRIEL_TEST(submapNoLongerSharesStorageWithSpawn) {
   CHECK_EQ(submap != nullptr ? submap->name : std::string{}, std::string{"resize"});
   CHECK(umbriel::payloadIf<umbriel::SpawnArg>(bind) == nullptr);
 
+  CHECK(!parseAction("submap", bind));
+  CHECK(!parseAction("submap:", bind));
+
   CHECK(parseAction("spawn:resize", bind));
   CHECK(umbriel::payloadIf<umbriel::SubmapArg>(bind) == nullptr);
 }
@@ -340,6 +343,12 @@ UMBRIEL_TEST(parsesArgumentFreeNewActions) {
   CHECK(parseAction("window-move-to-workspace-previous", bind));
   CHECK(bind.action == KeybindAction::WindowMoveToWorkspacePrevious);
 
+  CHECK(parseAction("column-move-to-workspace-next", bind));
+  CHECK(bind.action == KeybindAction::ColumnMoveToWorkspaceNext);
+
+  CHECK(parseAction("column-move-to-workspace-previous", bind));
+  CHECK(bind.action == KeybindAction::ColumnMoveToWorkspacePrevious);
+
   CHECK(parseAction("output-focus-left", bind));
   CHECK(bind.action == KeybindAction::OutputFocusLeft);
   CHECK(parseAction("output-focus-right", bind));
@@ -364,6 +373,8 @@ UMBRIEL_TEST(parsesArgumentFreeNewActions) {
   CHECK(!parseAction("workspace-next:1", bind));
   CHECK(!parseAction("window-move-to-workspace-next:1", bind));
   CHECK(!parseAction("window-move-to-workspace-previous:1", bind));
+  CHECK(!parseAction("column-move-to-workspace-next:1", bind));
+  CHECK(!parseAction("column-move-to-workspace-previous:1", bind));
   CHECK(!parseAction("output-focus-left:DP-1", bind));
   CHECK(!parseAction("window-center:x", bind));
   CHECK(!parseAction("window-toggle-maximize-to-edges:x", bind));
@@ -390,6 +401,11 @@ UMBRIEL_TEST(parsesWorkspaceSelectors) {
   CHECK(bind.action == KeybindAction::WindowMoveToWorkspace);
   CHECK_EQ(selector(bind).name, std::string{"2"});
   CHECK_EQ(selector(bind).output, std::string{"HDMI-A-1"});
+
+  CHECK(parseAction("column-move-to-workspace:chat/DP-1", bind));
+  CHECK(bind.action == KeybindAction::ColumnMoveToWorkspace);
+  CHECK_EQ(selector(bind).name, std::string{"chat"});
+  CHECK_EQ(selector(bind).output, std::string{"DP-1"});
 }
 
 UMBRIEL_TEST(rejectsMalformedWorkspaceSelectors) {
@@ -398,6 +414,8 @@ UMBRIEL_TEST(rejectsMalformedWorkspaceSelectors) {
   CHECK(!parseAction("workspace-switch:/DP-1", bind)); // empty workspace
   CHECK(!parseAction("workspace-switch:web/", bind));  // empty output
   CHECK(!parseAction("workspace-switch:a/b/c", bind)); // two separators
+  CHECK(!parseAction("column-move-to-workspace:", bind));
+  CHECK(!parseAction("column-move-to-workspace:/DP-1", bind));
 }
 
 UMBRIEL_TEST(parsesOptionalOutputActions) {

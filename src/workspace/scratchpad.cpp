@@ -85,6 +85,7 @@ namespace umbriel {
         .output = output,
         .returnOutput = {},
         .displacedOutput = {},
+        .displacedPosition = std::nullopt,
         .returnWorkspace = {},
         .returnTiled = view->tiled(),
     };
@@ -143,6 +144,23 @@ namespace umbriel {
     return true;
   }
 
+  void ScratchpadManager::retargetBackdrop(Output* output, bool visible) {
+    if (output == nullptr) {
+      return;
+    }
+    const auto& animation = config().animation;
+    const auto& scratchpad = animation.scratchpad;
+    auto fadeIt = m_backdropFades.try_emplace(output, 0.0).first;
+    AnimatedValue& backdropFade = fadeIt->second;
+    const double fadeTarget = visible ? 1.0 : 0.0;
+    if (animation.enabled && scratchpad.enabled && (backdropFade.animating() || backdropFade.current() != fadeTarget)) {
+      backdropFade.retarget(fadeTarget, scratchpad.durationMs, scratchpad.curve);
+    } else {
+      backdropFade.snap(fadeTarget);
+    }
+    updateDimAndBlur(output);
+  }
+
   void ScratchpadManager::setVisible(Output* output, bool visible) {
     if (output == nullptr) {
       return;
@@ -160,14 +178,7 @@ namespace umbriel {
     }
     const auto& animation = config().animation;
     const auto& scratchpad = animation.scratchpad;
-    auto fadeIt = m_backdropFades.try_emplace(output, 0.0).first;
-    AnimatedValue& backdropFade = fadeIt->second;
-    const double fadeTarget = visible ? 1.0 : 0.0;
-    if (animation.enabled && scratchpad.enabled && (backdropFade.animating() || backdropFade.current() != fadeTarget)) {
-      backdropFade.retarget(fadeTarget, scratchpad.durationMs, scratchpad.curve);
-    } else {
-      backdropFade.snap(fadeTarget);
-    }
+    retargetBackdrop(output, visible);
 
     for (const Entry& entry : m_entries) {
       if (entry.output != output || entry.view == nullptr) {
@@ -176,6 +187,10 @@ namespace umbriel {
       View* view = entry.view;
       if (visible) {
         view->setOnActiveWorkspace(true);
+        // Workspace-less views normally advertise the pointer's output. A
+        // scratchpad has an explicit owner, which can move while the pointer
+        // is still on an output that is being destroyed.
+        view->enterForeignOutput(output);
         std::erase(m_hidingViews, view);
         view->cancelPositionAnimation();
         view->setNodeEnabled(true);
@@ -392,6 +407,10 @@ namespace umbriel {
         m_visibleOutputs.push_back(output);
       }
     }
+    if (previous != it->output) {
+      it->displacedOutput.clear();
+      it->displacedPosition.reset();
+    }
     if (previous != it->output && it->lastFocused) {
       for (Entry& entry : m_entries) {
         if (&entry != &*it && entry.output == it->output) {
@@ -407,12 +426,15 @@ namespace umbriel {
   }
 
   void ScratchpadManager::restorePresentation(View* view) {
-    if (view == nullptr || !contains(view)) {
+    const auto entry =
+        std::ranges::find_if(m_entries, [view](const Entry& candidate) { return candidate.view == view; });
+    if (view == nullptr || entry == m_entries.end()) {
       return;
     }
     wlr_scene_node_reparent(&view->sceneTree()->node, m_root);
     view->reparentShadow(m_shadowRoot);
     view->setOnActiveWorkspace(true);
+    view->enterForeignOutput(entry->output);
     view->setNodeEnabled(true);
   }
 
@@ -449,6 +471,7 @@ namespace umbriel {
     m_entries.erase(it);
     if (std::ranges::none_of(m_entries, [output](const Entry& e) { return e.output == output; })) {
       std::erase(m_visibleOutputs, output);
+      retargetBackdrop(output, false);
     }
     if (m_focusedView == view) {
       m_focusedView = nullptr;
@@ -507,6 +530,7 @@ namespace umbriel {
     if (entryOutput != nullptr
         && std::ranges::none_of(m_entries, [entryOutput](const Entry& e) { return e.output == entryOutput; })) {
       std::erase(m_visibleOutputs, entryOutput);
+      retargetBackdrop(entryOutput, false);
     }
   }
 
@@ -532,6 +556,13 @@ namespace umbriel {
       if (entry.output == from) {
         if (entry.displacedOutput.empty() && from != nullptr && from->wlr()->name != nullptr) {
           entry.displacedOutput = from->wlr()->name;
+          const wlr_box homeArea = from->layoutBox();
+          if (entry.view != nullptr && homeArea.width > 0 && homeArea.height > 0) {
+            entry.displacedPosition = {{
+                static_cast<double>(entry.view->sceneTree()->node.x - homeArea.x) / homeArea.width,
+                static_cast<double>(entry.view->sceneTree()->node.y - homeArea.y) / homeArea.height,
+            }};
+          }
         }
         entry.output = to;
         if (from != nullptr && to != nullptr && entry.view != nullptr) {
@@ -568,14 +599,38 @@ namespace umbriel {
     for (Entry& entry : m_entries) {
       Output* home = entry.displacedOutput.empty() ? nullptr : m_server->outputFromName(entry.displacedOutput);
       if (home != nullptr) {
+        const wlr_box homeArea = home->layoutBox();
+        if (entry.view != nullptr && entry.displacedPosition && homeArea.width > 0 && homeArea.height > 0) {
+          entry.view->cancelPositionAnimation();
+          entry.view->setPosition(
+              homeArea.x + static_cast<int>(std::lround((*entry.displacedPosition)[0] * homeArea.width)),
+              homeArea.y + static_cast<int>(std::lround((*entry.displacedPosition)[1] * homeArea.height))
+          );
+        }
         entry.displacedOutput.clear();
+        entry.displacedPosition.reset();
       }
       Output* target = home != nullptr ? home : (entry.output == nullptr ? fallback : nullptr);
       if (target == nullptr || target == entry.output) {
         continue;
       }
+      Output* source = entry.output;
+      const bool wasVisible =
+          source != nullptr && std::ranges::find(m_visibleOutputs, source) != m_visibleOutputs.end();
+      if (entry.lastFocused) {
+        for (Entry& candidate : m_entries) {
+          if (&candidate != &entry && candidate.output == target) {
+            candidate.lastFocused = false;
+          }
+        }
+      }
       entry.output = target;
-      if (entry.view != nullptr) {
+      if (wasVisible) {
+        if (std::ranges::none_of(m_entries, [source](const Entry& candidate) { return candidate.output == source; })) {
+          setVisible(source, false);
+        }
+        setVisible(target, true);
+      } else if (entry.view != nullptr) {
         const bool visible = std::ranges::find(m_visibleOutputs, target) != m_visibleOutputs.end();
         entry.view->setOnActiveWorkspace(visible);
         entry.view->setNodeEnabled(visible);

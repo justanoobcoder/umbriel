@@ -51,6 +51,10 @@ namespace umbriel {
       std::optional<ScrollingDirection> direction;
       bool operator==(const Scrolling&) const = default;
     } scrolling;
+    struct Dwindle {
+      std::optional<bool> preserveSplit;
+      bool operator==(const Dwindle&) const = default;
+    } dwindle;
     struct Master {
       std::optional<double> defaultWidthFraction;
       std::optional<MasterPosition> position;
@@ -81,6 +85,10 @@ namespace umbriel {
       ScrollingDirection direction = ScrollingDirection::Horizontal;
       bool operator==(const Scrolling&) const = default;
     } scrolling;
+    struct Dwindle {
+      bool preserveSplit = false;
+      bool operator==(const Dwindle&) const = default;
+    } dwindle;
     struct Master {
       double defaultWidthFraction = 0.55;
       MasterPosition position = MasterPosition::Left;
@@ -157,6 +165,8 @@ namespace umbriel {
     // Global safety gate. Even a client async hint or a window-rule override
     // cannot request tearing unless the owning output enables it.
     bool allowTearing = false;
+    // Allow eligible fullscreen buffers to bypass composition on this output.
+    bool directScanout = true;
     HdrMode hdr = HdrMode::Off;
     float sdrWhite = 203.0F;
     // Explicit workspace inventory. Omitted means dynamic workspaces.
@@ -459,6 +469,10 @@ namespace umbriel {
         ScrollingDirection direction = ScrollingDirection::Horizontal;
         bool operator==(const Scrolling&) const = default;
       } scrolling;
+      struct Dwindle {
+        bool preserveSplit = false;
+        bool operator==(const Dwindle&) const = default;
+      } dwindle;
       struct Master {
         double defaultWidthFraction = 0.55;
         MasterPosition position = MasterPosition::Left;
@@ -495,7 +509,7 @@ namespace umbriel {
     } general;
 
     struct Environment {
-      // Ordered list of NAME=value pairs exported to the compositor process.
+      // Ordered NAME=value pairs exported to the compositor and the native session's systemd user manager.
       std::vector<std::pair<std::string, std::string>> variables;
       bool operator==(const Environment&) const = default;
     } environment;

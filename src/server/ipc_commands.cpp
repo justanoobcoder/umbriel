@@ -32,6 +32,18 @@ namespace umbriel {
       }
     }
 
+    const char* layoutModeName(LayoutMode mode) {
+      switch (mode) {
+      case LayoutMode::Scrolling:
+        return "scrolling";
+      case LayoutMode::Dwindle:
+        return "dwindle";
+      case LayoutMode::Master:
+        return "master";
+      }
+      return "unknown";
+    }
+
     void printWindows(const nlohmann::json& ok) {
       for (const auto& entry : ok) {
         const std::string appId = entry.value("app_id", "");
@@ -44,6 +56,26 @@ namespace umbriel {
             entry.value("h", 0), entry.value("x", 0), entry.value("y", 0)
         );
       }
+    }
+
+    void printWorkspaces(const nlohmann::json& ok) {
+      for (const auto& entry : ok) {
+        const std::string output = entry.value("output", "");
+        const std::string name = entry.value("name", "");
+        const std::string layout = entry.value("layout", "unknown");
+        std::println(
+            "{} {}: {} [{}]{}", entry.value("active", false) ? "*" : " ", output.empty() ? "-" : output,
+            name.empty() ? "-" : name, layout, entry.value("focused", false) ? " (focused)" : ""
+        );
+      }
+    }
+
+    void printSubmap(const nlohmann::json& ok) {
+      if (!ok.is_string()) {
+        return;
+      }
+      const std::string name = ok.get<std::string>();
+      std::println("{}", name.empty() ? "unnamed" : name);
     }
 
     void printLayers(const nlohmann::json& ok) {
@@ -325,6 +357,41 @@ namespace umbriel {
     return nlohmann::json{{"ok", windows}};
   }
 
+  nlohmann::json IpcCommands::workspaces(Server& server, std::string_view /*arg*/) {
+    nlohmann::json workspaces = nlohmann::json::array();
+    const Output* preferred = server.outputFromWlr(server.preferredOutput());
+    for (const auto& output : server.outputs()) {
+      WorkspaceGroup* group = output->workspaceGroup();
+      if (group == nullptr) {
+        continue;
+      }
+      for (size_t index = 0; index < group->workspaceCount(); ++index) {
+        Workspace* workspace = group->workspaceAt(index);
+        if (workspace == nullptr) {
+          continue;
+        }
+        workspaces.push_back({
+            {"id", workspace->id()},
+            {"name", workspace->name()},
+            {"index", workspace->index() + 1},
+            {"output", output->wlr()->name},
+            {"active", workspace->active()},
+            {"focused", output.get() == preferred && workspace->active()},
+            {"layout", layoutModeName(workspace->layoutMode())},
+        });
+      }
+    }
+    return nlohmann::json{{"ok", workspaces}};
+  }
+
+  nlohmann::json IpcCommands::submap(Server& server, std::string_view /*arg*/) {
+    nlohmann::json active = nullptr;
+    if (server.inSubmap()) {
+      active = server.activeSubmap();
+    }
+    return nlohmann::json{{"ok", std::move(active)}};
+  }
+
   nlohmann::json IpcCommands::layers(Server& server, std::string_view /*arg*/) {
     nlohmann::json layers = nlohmann::json::array();
     for (const auto& l : server.layerSurfaces()) {
@@ -518,6 +585,8 @@ namespace umbriel {
   static constexpr IpcCommandSpec kIpcCommands[] = {
       {"msg", "<action> [args...]", "send an action to the compositor", true, &IpcCommands::msg, nullptr},
       {"windows", "", "list windows (app id and title)", false, &IpcCommands::windows, &printWindows},
+      {"workspaces", "", "list workspaces and their layouts", false, &IpcCommands::workspaces, &printWorkspaces},
+      {"submap", "", "show the active keybind submap", false, &IpcCommands::submap, &printSubmap},
       {"layers", "", "list layer-shell surfaces", false, &IpcCommands::layers, &printLayers},
       {"color", "", "show color-management state", false, &IpcCommands::color, &printColor},
       {"tearing", "", "show tearing-control state", false, &IpcCommands::tearing, &printTearing},

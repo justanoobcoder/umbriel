@@ -19,6 +19,24 @@ add_project_arguments(
   '-DUMBRIEL_VERSION="' + meson.project_version() + '"',
   language: 'cpp',
 )
+git_program = find_program('git', required: false)
+if git_program.found()
+  umbriel_git_revision_h = vcs_tag(
+    input: 'src/core/git_revision.h.in',
+    output: 'umbriel_git_revision.h',
+    command: [git_program, 'describe', '--tags', '--always', '--dirty=-dirty', '--abbrev=12'],
+    fallback: 'unknown',
+  )
+else
+  umbriel_git_revision_config = configuration_data()
+  umbriel_git_revision_config.set('VCS_TAG', 'unknown')
+  umbriel_git_revision_h = configure_file(
+    input: 'src/core/git_revision.h.in',
+    output: 'umbriel_git_revision.h',
+    configuration: umbriel_git_revision_config,
+  )
+endif
+
 umbriel_data_dir = get_option('prefix') / get_option('datadir')
 umbriel_build_config = configuration_data()
 umbriel_build_config.set_quoted('UMBRIEL_DATA_DIR', umbriel_data_dir)
@@ -91,6 +109,10 @@ if pkgconfig.found()
       'capture_sdr',
       prefix: '#include <scenefx/types/wlr_scene.h>',
       args: scenefx_cflags,
+    ) and cpp.has_header_symbol(
+      'scenefx/types/wlr_scene.h',
+      'wlr_scene_output_set_direct_scanout_enabled',
+      args: scenefx_cflags,
     )
   endif
 endif
@@ -109,6 +131,7 @@ else
     or not scenefx_header_source.contains('wlr_scene_output_set_sdr_white_level')
     or not scenefx_header_source.contains('wlr_scene_buffer_set_luminance_multiplier')
     or not scenefx_header_source.contains('capture_sdr')
+    or not scenefx_header_source.contains('wlr_scene_output_set_direct_scanout_enabled')
   )
     error('SceneFX submodule must provide Umbriel patched APIs')
   endif
@@ -154,6 +177,19 @@ layer_shell_client_c = custom_target(
   'wlr-layer-shell-unstable-v1-client-protocol.c',
   input: 'protocols/wlr-layer-shell-unstable-v1.xml',
   output: 'wlr-layer-shell-unstable-v1-client-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+)
+
+foreign_toplevel_client_h = custom_target(
+  'wlr-foreign-toplevel-management-unstable-v1-client-protocol.h',
+  input: 'protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
+  output: 'wlr-foreign-toplevel-management-unstable-v1-client-protocol.h',
+  command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
+)
+foreign_toplevel_client_c = custom_target(
+  'wlr-foreign-toplevel-management-unstable-v1-client-protocol.c',
+  input: 'protocols/wlr-foreign-toplevel-management-unstable-v1.xml',
+  output: 'wlr-foreign-toplevel-management-unstable-v1-client-protocol.c',
   command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
 )
 
@@ -426,7 +462,7 @@ umbriel_core_dep = declare_dependency(
 
 umbriel = executable(
   'umbriel',
-  'src/main.cpp',
+  ['src/main.cpp', umbriel_git_revision_h],
   cpp_args: jemalloc_cpp_args,
   dependencies: [umbriel_core_dep] + jemalloc_deps,
   install: true,
@@ -496,6 +532,14 @@ drag_client = executable(
   dependencies: [wayland_client_dep],
 )
 
+# Harness helper that reserves an exclusive zone on a named output. Output
+# restoration checks use it to reproduce a panel returning after windows do.
+layer_client = executable(
+  'layer-client',
+  ['tests/harness/clients/layer_client.cpp', layer_shell_client_h, layer_shell_client_c, xdg_shell_client_c],
+  dependencies: [wayland_client_dep],
+)
+
 # Harness helper that checks whether a Wayland global is visible to a newly
 # connected client.
 global_client = executable(
@@ -508,6 +552,18 @@ global_client = executable(
 workspace_client = executable(
   'workspace-client',
   ['tests/harness/clients/workspace_client.cpp', ext_workspace_client_h, ext_workspace_client_c],
+  dependencies: [wayland_client_dep],
+)
+
+# Harness helper that checks the output membership advertised for a foreign
+# toplevel, including while its workspace is inactive.
+foreign_toplevel_client = executable(
+  'foreign-toplevel-client',
+  [
+    'tests/harness/clients/foreign_toplevel_client.cpp',
+    foreign_toplevel_client_h,
+    foreign_toplevel_client_c,
+  ],
   dependencies: [wayland_client_dep],
 )
 
@@ -564,8 +620,10 @@ alias_target(
   pointer_client,
   input_method_client,
   drag_client,
+  layer_client,
   global_client,
   workspace_client,
+  foreign_toplevel_client,
   unmap_client,
   popup_client,
   subsurface_client,

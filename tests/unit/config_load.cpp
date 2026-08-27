@@ -1,6 +1,7 @@
 #include "check.h"
 #include "config/store.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -149,6 +150,8 @@ width_presets = [0.05, 0.5, 2.0]
 [layout.scrolling]
 center_underfull_strip = false
 always_center_single_column = true
+[layout.dwindle]
+preserve_split = true
 
 [output.DP-1]
 workspaces = ["dev"]
@@ -163,6 +166,8 @@ width_presets = [0.25, 0.75]
 
 [workspace.layout.scrolling]
 center_underfull_strip = true
+[workspace.layout.dwindle]
+preserve_split = false
 )");
 
   ConfigStore& store = umbriel::configStore();
@@ -176,6 +181,7 @@ center_underfull_strip = true
   CHECK_EQ(store.config().layout.widthPresets[1], 0.5);
   CHECK_EQ(store.config().layout.widthPresets[2], 1.0);
   CHECK(!store.config().layout.scrolling.centerUnderfullStrip);
+  CHECK(store.config().layout.dwindle.preserveSplit);
   CHECK(store.config().appearance.preferNoCsd);
   CHECK_EQ(store.config().outputs.size(), size_t{1});
   CHECK(store.config().outputs[0].scale.has_value());
@@ -185,10 +191,20 @@ center_underfull_strip = true
   CHECK(store.config().workspaceRules[0].layout.widthPresets.has_value());
   CHECK_EQ(store.config().workspaceRules[0].layout.widthPresets->size(), size_t{2});
   CHECK(store.config().workspaceRules[0].layout.scrolling.centerUnderfullStrip == true);
+  CHECK(store.config().workspaceRules[0].layout.dwindle.preserveSplit == false);
   CHECK(containsDiagnostic(store, "unknown key unknown_root_key"));
   CHECK(containsDiagnostic(store, "output.DP-1.scale = 9"));
   CHECK(containsDiagnostic(store, "unknown key layout.scrolling.always_center_single_column"));
   CHECK(containsDiagnostic(store, "unknown key general.prefer_no_csd"));
+}
+
+UMBRIEL_TEST(dwindlePreserveSplitDefaultsToFalse) {
+  const TempConfig file;
+  file.write("[layout]\n");
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+  CHECK(store.reload().success);
+  CHECK(!store.config().layout.dwindle.preserveSplit);
 }
 
 UMBRIEL_TEST(masterLayoutReadersLoadGlobalAndWorkspaceSettings) {
@@ -420,6 +436,30 @@ UMBRIEL_TEST(outputTearingPermissionLoadsAndDefaultsDisabled) {
   CHECK(store.reload().success);
   CHECK(!store.config().outputs[0].allowTearing);
   CHECK(containsDiagnostic(store, "ignoring output.DP-1.tearing (expected boolean)"));
+}
+
+UMBRIEL_TEST(outputDirectScanoutPolicyLoadsAndDefaultsEnabled) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[output.DP-1]\ndirect_scanout = false\n");
+  CHECK(store.reload().success);
+  CHECK_EQ(store.config().outputs.size(), size_t{1});
+  CHECK(!store.config().outputs[0].directScanout);
+
+  file.write("[output.DP-1]\ndirect_scanout = true\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().outputs[0].directScanout);
+
+  file.write("[output.DP-1]\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().outputs[0].directScanout);
+
+  file.write("[output.DP-1]\ndirect_scanout = \"no\"\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().outputs[0].directScanout);
+  CHECK(containsDiagnostic(store, "ignoring output.DP-1.direct_scanout (expected boolean)"));
 }
 
 UMBRIEL_TEST(outputHdrPolicyAndSdrWhiteLoad) {
@@ -995,6 +1035,40 @@ enabled = true
   CHECK(containsDiagnostic(store, "unknown key appearance.animations"));
   CHECK(containsDiagnostic(store, "unknown key animations"));
   CHECK(containsDiagnostic(store, "unknown key animation.fade"));
+}
+
+UMBRIEL_TEST(environmentRequiresStringValuesAndPortableNames) {
+  const TempConfig file;
+  file.write(R"(
+[environment]
+DXVK_HDR = "1"
+_PRIVATE = "kept"
+"9INVALID" = "ignored"
+"HAS-HYPHEN" = "ignored"
+NOT_A_STRING = 1
+WAYLAND_DISPLAY = "wrong"
+)");
+
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+  const umbriel::ConfigReloadResult result = store.reload();
+
+  CHECK(result.success);
+  CHECK_EQ(store.config().environment.variables.size(), size_t{2});
+  CHECK(
+      std::ranges::find(store.config().environment.variables, std::pair{std::string{"DXVK_HDR"}, std::string{"1"}})
+      != store.config().environment.variables.end()
+  );
+  CHECK(
+      std::ranges::find(store.config().environment.variables, std::pair{std::string{"_PRIVATE"}, std::string{"kept"}})
+      != store.config().environment.variables.end()
+  );
+  CHECK(containsDiagnostic(store, R"(ignoring environment key "9INVALID" (expected [A-Za-z_][A-Za-z0-9_]*))"));
+  CHECK(containsDiagnostic(store, R"(ignoring environment key "HAS-HYPHEN" (expected [A-Za-z_][A-Za-z0-9_]*))"));
+  CHECK(containsDiagnostic(store, "ignoring environment.NOT_A_STRING (expected string)"));
+  CHECK(containsDiagnostic(store, "ignoring environment.WAYLAND_DISPLAY (reserved by Umbriel)"));
+  CHECK(!containsDiagnostic(store, "unknown key environment.DXVK_HDR"));
+  CHECK(!containsDiagnostic(store, "unknown key environment._PRIVATE"));
 }
 
 UMBRIEL_TEST(packagedAnimationDefaultsMatchCompiledDefaults) {

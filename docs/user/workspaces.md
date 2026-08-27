@@ -3,6 +3,32 @@
 This page covers workspace models, reload behavior, and per-workspace layout
 rules.
 
+## Inspect workspace state
+
+Run `umbriel workspaces` to list every workspace with its output and effective
+layout mode. An asterisk marks the active workspace on each output, while
+`(focused)` identifies the active workspace on the output Umbriel currently
+targets for actions.
+
+```text
+* DP-1: 1 [scrolling] (focused)
+  DP-1: 2 [dwindle]
+* DP-2: WEB [master]
+```
+
+Use `umbriel workspaces --json` for structured output. Each entry contains the
+workspace `id`, `name`, one-based `index`, `output`, `active`, `focused`, and
+`layout`. `active` is per output, so more than one workspace can be active.
+`focused` is true for at most one workspace. The `layout` value is the current
+effective mode, including an override made with `workspace-set-layout`.
+
+For example, this prints the layout on the workspace currently targeted by
+workspace actions:
+
+```sh
+umbriel workspaces --json | jq -r '.[] | select(.focused).layout'
+```
+
 ## Global workspace settings
 
 ```toml
@@ -95,6 +121,7 @@ and numbered positions as those workspaces are created or removed.
 | `layout.scrolling.direction` | string | `"horizontal"` or `"vertical"` scroll axis. |
 | `layout.master.position` | string | Side occupied by the master area: `"left"` or `"right"`. |
 | `layout.master.default_width_fraction` | float | Master area fraction when both areas exist (0.1-0.9). |
+| `layout.dwindle.preserve_split` | bool | Keep each Dwindle split direction fixed after it is created when true. |
 
 ### Examples
 

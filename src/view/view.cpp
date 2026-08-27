@@ -221,8 +221,12 @@ namespace umbriel {
   wlr_scene_tree* View::captureTree() const { return m_captureScene != nullptr ? &m_captureScene->tree : nullptr; }
 
   void View::moveToWorkspace(Workspace* workspace, bool attachToLayout) {
+    const bool wasDisplaced = m_displacedHome.has_value();
     m_displacedHome.reset();
     setWorkspace(workspace, attachToLayout);
+    if (wasDisplaced) {
+      m_server->scheduleDisplacedViewRestore();
+    }
   }
 
   void View::setWorkspace(Workspace* workspace, bool attachToLayout) {
@@ -259,9 +263,9 @@ namespace umbriel {
     }
     notifyOutputScale();
     if (m_mapped) {
-      if (m_workspace != nullptr && m_onActiveWorkspace) {
+      if (m_workspace != nullptr) {
         enterForeignOutput();
-      } else if (m_workspace == nullptr) {
+      } else {
         // An unassigned view has no output to advertise. In particular, the preferred output may be the one currently
         // being destroyed, and foreign-toplevel output membership installs a bind listener that must be gone before
         // wlr_output_finish completes.
@@ -283,6 +287,22 @@ namespace umbriel {
     if (Overview* overview = m_server->overview(); overview != nullptr && overview->active()) {
       overview->onViewWorkspaceChanged(this);
     }
+  }
+
+  bool View::attachToAvailableWorkspace(const ResolvedWindowRule& rule) {
+    Output* preferred = m_server->outputFromWlr(m_server->preferredOutput());
+    WorkspaceGroup* preferredGroup = preferred != nullptr ? preferred->workspaceGroup() : nullptr;
+    WorkspaceGroup* targetGroup = windowRuleWorkspaceGroup(*m_server, rule, preferredGroup);
+    Workspace* target = windowRuleWorkspace(targetGroup, rule);
+    if (target == nullptr) {
+      return false;
+    }
+    setWorkspace(target, false);
+    if (m_workspace != target) {
+      return false;
+    }
+    target->layoutAttach(this, rule.defaultWidth);
+    return true;
   }
 
   void View::detachWorkspace() {
@@ -1032,7 +1052,9 @@ namespace umbriel {
   int View::borderInset() const { return decorated() ? config().appearance.totalBorderWidth() : 0; }
 
   int View::surfaceRadius() const {
-    return decorated() && !m_toplevel->scheduled.fullscreen ? config().appearance.cornerRadius : 0;
+    return decorated() && !m_toplevel->scheduled.fullscreen
+        ? nestedRadius(config().appearance.cornerRadius, borderInset())
+        : 0;
   }
 
   void View::setBorderFocused(bool focused) {
@@ -1173,9 +1195,9 @@ namespace umbriel {
   }
 
   void View::updateShadow(int contentWidth, int contentHeight) {
-    const int inset = borderInset();
+    const int borderTotal = borderInset();
     m_decoration.updateShadow(
-        contentWidth, contentHeight, inset, decorated() ? expandedRadius(config().appearance.cornerRadius, inset) : 0
+        contentWidth, contentHeight, borderTotal, decorated() ? config().appearance.cornerRadius : 0
     );
   }
 
@@ -1232,10 +1254,8 @@ namespace umbriel {
     }
     wlr_scene_node_set_position(&snap->node, m_sceneTree->node.x, m_sceneTree->node.y);
 
-    // Collect border rects for the snapshot.
-    std::vector<std::pair<wlr_scene_rect*, std::array<float, 4>>> snapRects;
-
-    m_decoration.snapshotBorders(snap, m_borderFocusedState, snapRects);
+    std::vector<BorderSnapshot> snapBorders;
+    m_decoration.snapshotBorders(snap, m_borderFocusedState, snapBorders);
 
     // Copy surface buffers.
     struct CopyCtx {
@@ -1281,7 +1301,7 @@ namespace umbriel {
       return;
     }
 
-    m_server->animateCloseSnapshot(output, snap, std::move(snapRects));
+    m_server->animateCloseSnapshot(output, snap, std::move(snapBorders));
     wlr_output_schedule_frame(output->wlr());
   }
 
@@ -1594,16 +1614,8 @@ namespace umbriel {
 
     if (m_workspace != nullptr) {
       m_workspace->layoutAttach(this, rule.defaultWidth);
-    } else {
-      Output* preferred = m_server->outputFromWlr(m_server->preferredOutput());
-      WorkspaceGroup* preferredGroup = preferred != nullptr ? preferred->workspaceGroup() : nullptr;
-      WorkspaceGroup* targetGroup = windowRuleWorkspaceGroup(*m_server, rule, preferredGroup);
-      if (Workspace* target = windowRuleWorkspace(targetGroup, rule)) {
-        setWorkspace(target, /*attachToLayout=*/false);
-        target->layoutAttach(this, rule.defaultWidth);
-      } else {
-        setOnActiveWorkspace(true);
-      }
+    } else if (!attachToAvailableWorkspace(rule)) {
+      setOnActiveWorkspace(true);
     }
     if (rule.defaultPinned && *rule.defaultPinned) {
       setPinned(true, false);
@@ -1702,6 +1714,11 @@ namespace umbriel {
     if (Output* output = currentOutput()) {
       output->updateHdr();
     }
+    if (m_displacedHome) {
+      // Snapshot peers retain their member ids while this view is unmapped.
+      // Replay their shared structure now that this member is visible again.
+      m_server->scheduleDisplacedViewRestore();
+    }
   }
 
   void View::handleUnmap() {
@@ -1775,6 +1792,9 @@ namespace umbriel {
     m_ruleOpacity = 1.0F;
     m_hasMaximizeRestoreBox = false;
     m_floating.clearSizeRequest();
+    if (m_displacedHome) {
+      m_server->scheduleDisplacedViewRestore();
+    }
   }
 
   void View::handleCommit() {
@@ -1840,7 +1860,8 @@ namespace umbriel {
         }
         const Layout& layout = target != nullptr ? target->layout() : *fallbackLayout;
 
-        const Layout::InitialSize initial = layout.initialSize(usable, rule.defaultWidth);
+        const Layout::InitialSize initial =
+            layout.initialSize(usable, rule.defaultWidth, target != nullptr ? target->focusedView() : nullptr);
         const int width = rule.defaultSize ? (*rule.defaultSize)[0] : initial.width;
         wlr_xdg_toplevel_set_size(m_toplevel, width, initial.height);
       } else {

@@ -16,6 +16,7 @@
 // clang-format on
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -33,6 +34,11 @@ namespace umbriel {
   namespace {
 
     constexpr Logger kLog("config");
+
+    constexpr std::array<std::string_view, 7> kReservedEnvironmentNames{
+        "WAYLAND_DISPLAY",     "WAYLAND_SOCKET",      "DISPLAY",          "UMBRIEL_SOCKET",
+        "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "XDG_SESSION_TYPE",
+    };
 
     // Well past any real layout: a value this large already means "no limit".
     constexpr double kMaxFollowsMouseScroll = 100.0;
@@ -367,6 +373,7 @@ namespace umbriel {
               sc.real("default_width_fraction", 0.1, 1.0, overrides.scrolling.defaultWidthFraction)
                   .boolean("center_underfull_strip", overrides.scrolling.centerUnderfullStrip);
             });
+            s.sub("dwindle", [&](Section& sd) { sd.boolean("preserve_split", overrides.dwindle.preserveSplit); });
             s.sub("master", [&](Section& sm) {
               if (const auto position = readMasterPosition(sm, layoutContext + ".master")) {
                 overrides.master.position = position;
@@ -845,6 +852,7 @@ namespace umbriel {
           sc.real("default_width_fraction", 0.1, 1.0, loaded.layout.scrolling.defaultWidthFraction)
               .boolean("center_underfull_strip", loaded.layout.scrolling.centerUnderfullStrip);
         });
+        s.sub("dwindle", [&](Section& sd) { sd.boolean("preserve_split", loaded.layout.dwindle.preserveSplit); });
         s.sub("master", [&](Section& sm) {
           if (const auto position = readMasterPosition(sm, "layout.master")) {
             loaded.layout.master.position = *position;
@@ -891,7 +899,32 @@ namespace umbriel {
     }
 
     void readEnvironment(Section& root, Config& loaded) {
-      root.sub("environment", [&](Section& s) { s.eachString(loaded.environment.variables); });
+      root.sub("environment", [&](Section& s) {
+        s.freeform();
+        std::vector<std::pair<std::string, std::string>> parsed;
+        parsed.reserve(s.table().size());
+        for (const auto& [key, value] : s.table()) {
+          const auto entry = value.value<std::string>();
+          if (!entry) {
+            warnAt(value.source(), "ignoring environment.{} (expected string)", key.str());
+            continue;
+          }
+          if (!isEnvironmentVariableName(key.str())) {
+            warnAt(key.source(), R"(ignoring environment key "{}" (expected [A-Za-z_][A-Za-z0-9_]*))", key.str());
+            continue;
+          }
+          if (std::ranges::find(kReservedEnvironmentNames, key.str()) != kReservedEnvironmentNames.end()) {
+            warnAt(key.source(), "ignoring environment.{} (reserved by Umbriel)", key.str());
+            continue;
+          }
+          if (entry->contains('\0')) {
+            warnAt(value.source(), "ignoring environment.{} (value contains NUL)", key.str());
+            continue;
+          }
+          parsed.emplace_back(std::string(key.str()), *entry);
+        }
+        loaded.environment.variables = std::move(parsed);
+      });
     }
 
     bool validateKeyboardInput(
@@ -1100,7 +1133,9 @@ namespace umbriel {
         }
         OutputRule rule;
         rule.name = name;
-        keys.boolean("enabled", rule.enabled).boolean("tearing", rule.allowTearing);
+        keys.boolean("enabled", rule.enabled)
+            .boolean("tearing", rule.allowTearing)
+            .boolean("direct_scanout", rule.directScanout);
         if (const toml::node* workspacesNode = keys.take("workspaces")) {
           if (const auto count = workspacesNode->value<std::int64_t>()) {
             if (*count < 1 || *count > static_cast<std::int64_t>(kMaxWorkspaces)) {
