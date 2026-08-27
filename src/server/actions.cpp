@@ -863,6 +863,36 @@ namespace umbriel {
       return true;
     }
 
+    bool actionWorkspaceBackAndForth(Server& server, const Keybind& bind, std::string* /*error*/) {
+      Workspace* workspace = activeWorkspace(server);
+      if (workspace == nullptr) {
+        return true;
+      }
+      WorkspaceGroup* group = workspace->group();
+      if (group == nullptr) {
+        return true;
+      }
+      Workspace* previous = group->previous();
+      if (previous == nullptr || previous == workspace) {
+        return true;
+      }
+
+      if (bind.action == KeybindAction::WindowMoveToWorkspaceBackAndForth) {
+        for (const auto& entry : server.views()) {
+          if (entry->mapped() && entry->onActiveWorkspace()) {
+            moveViewToWorkspace(server, *entry, *previous);
+            return true;
+          }
+        }
+      }
+      group->select(previous);
+      Output* destination = group->output();
+      if (destination != nullptr && destination != server.outputFromWlr(server.preferredOutput())) {
+        warpToOutputCenter(server, *destination);
+      }
+      return true;
+    }
+
     template <int Direction> bool actionWorkspaceMove(Server& server, const Keybind& /*bind*/, std::string* /*error*/) {
       Workspace* workspace = activeWorkspace(server);
       if (workspace == nullptr || workspace->group() == nullptr) {
@@ -1216,6 +1246,8 @@ namespace umbriel {
         &actionFocusLastColumn,
         &actionMoveColumnFirst,
         &actionMoveColumnLast,
+        &actionWorkspaceBackAndForth,
+        &actionWorkspaceBackAndForth,
     };
 
     consteval bool everyActionHasHandler() {

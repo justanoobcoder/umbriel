@@ -46,6 +46,7 @@ These take no argument.
 | `window-focus-or-output-up` / `window-focus-or-output-down` | Move focus to the adjacent window along the column; if already at the edge, focus the output in that direction instead. |
 | `window-focus-next` | Cycle focus to the next mapped window on the active workspace. |
 | `window-move-to-workspace-next` / `window-move-to-workspace-previous` | Move the focused window to the adjacent workspace and follow it. These actions do not wrap around. |
+| `window-move-to-workspace-back-and-forth` | Move the focused window to the previously active workspace and follow it. |
 | `column-move-left` / `column-move-right` | Move the focused window's column left or right. |
 | `window-move-or-output-left` / `window-move-or-output-right` | Move the focused window's column left or right; if already at the edge, move the column to the output in that direction instead. |
 | `column-move-to-first` / `column-move-to-last` | Move the focused window's column to the first or last position in the workspace. |
@@ -98,6 +99,9 @@ window fullscreen removes its pinned state.
 focused output, by index. They do not wrap around: `workspace-previous` on the
 first workspace is a silent no-op. On a dynamic output, `workspace-next` reaches
 the trailing empty workspace, which becomes active as usual.
+
+`workspace-back-and-forth` switches to the previously active workspace on the
+focused output, providing behavior similar to Alt+Tab.
 
 `workspace-move-down` and `workspace-move-up` move the focused workspace up or down
 on the focused output. They do not wrap around either.

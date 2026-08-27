@@ -113,6 +113,8 @@ namespace umbriel {
     ColumnFocusLast,
     ColumnMoveToFirst,
     ColumnMoveToLast,
+    WorkspaceBackAndForth,
+    WindowMoveToWorkspaceBackAndForth,
     Count,
   };
 
