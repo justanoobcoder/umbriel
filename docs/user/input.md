@@ -59,18 +59,30 @@ tap = true
 natural_scroll = true
 # accel_profile = "adaptive"  # "flat", "adaptive", or a custom curve
 # sensitivity = 0.5           # -1.0 to 1.0
+# scroll_factor = 1.5         # touchpad scroll speed, 0.1 to 10.0
+# disable_while_typing = true
 ```
 
 Tap-to-click is enabled by default. Set `tap = false` to disable it globally,
-or use a per-device override below. `natural_scroll` remains unset by default,
-which preserves each device's libinput setting. Options are applied only when
-supported by the device.
+or use a per-device override below. `natural_scroll` and
+`disable_while_typing` remain unset by default, which preserves each device's
+corresponding libinput default. Set `disable_while_typing = false` to keep the
+touchpad active while typing. Removing either optional setting on reload
+restores the device default. Options are applied only when supported by the
+device; an explicitly configured unsupported option is reported in the log.
 
 `accel_profile` and `sensitivity` work like their `[input.mouse]` counterparts,
 including custom curves. Both remain unset by default, which uses each
 touchpad's libinput default profile and speed. Removing either setting on reload
 restores the corresponding default. `sensitivity` alone adjusts pointer speed
 under the device's default profile.
+
+`scroll_factor` multiplies the smooth two-finger scroll a touchpad sends to the
+focused window, so `2.0` scrolls twice as fast and `0.5` half as fast. It
+remains unset by default (identity, `1.0`) and takes the next scroll event on
+reload. It applies only to the continuous scroll delta: discrete notches,
+overview wheel stepping, and three-finger-swipe strip travel keep their own
+counting semantics.
 
 ### Mouse
 
@@ -121,6 +133,7 @@ tap = true
 natural_scroll = false
 accel_profile = "flat"
 sensitivity = 0.0
+disable_while_typing = false
 
 [[input.device]]
 name = "Acme Gaming Mouse"
@@ -130,10 +143,11 @@ sensitivity = 0.0
 
 Each rule inherits the matching class settings and overrides only the keys it
 contains. `layout`, `variant`, `options`, `repeat_rate`, and `repeat_delay`
-apply to keyboards. `tap` applies to touchpads. `natural_scroll` applies to
-touchpads and mice. `accel_profile` and `sensitivity` apply to mice and
-touchpads; for a touchpad the rule overrides `[input.touchpad]` rather than
-`[input.mouse]`. Unsupported libinput settings are reported in the log.
+apply to keyboards. `tap` and `disable_while_typing` apply to touchpads.
+`natural_scroll` applies to touchpads and mice. `accel_profile` and
+`sensitivity` apply to mice and touchpads; for a touchpad the rule overrides
+`[input.touchpad]` rather than `[input.mouse]`. Unsupported libinput settings
+are reported in the log.
 
 Rules match every attached device with the exact name. Device overrides also
 apply when a device is connected after startup and when the configuration is
@@ -185,6 +199,7 @@ config reload, as do the mapping options for the next pen event.
 theme = ""   # empty = environment/default Xcursor theme
 size = 24    # 1-512
 hardware_cursor = true
+follows_focus = false
 hide_when_typing = false
 hide_timeout_ms = 0  # 0-3600000, 0 disables hiding
 ```
@@ -201,6 +216,14 @@ Set `hide_timeout_ms` to a value from `1` to `3600000` to hide the cursor after
 that many milliseconds without pointer activity. Motion, clicks, scrolling,
 and tablet input reveal the cursor and restart the timeout. The two hiding
 options can be enabled together.
+
+Set `follows_focus = true` to warp the cursor to the visible center of a window
+selected by directional window focus, next-window focus, floating-state focus,
+or first/last-column focus navigation. This applies whether the action comes
+from a keybind, wheel bind, or IPC. Pointer-driven focus, automatic focus after
+a window closes, gestures, and overview selection do not warp the cursor.
+`window-focus:<id>` remains focus-only; use `window-focus-warp:<id>` when an
+individual id-based request must always move the cursor.
 
 ### Focus
 

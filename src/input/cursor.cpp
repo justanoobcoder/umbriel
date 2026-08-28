@@ -47,6 +47,20 @@ namespace umbriel {
       return surface != nullptr && wlr_xdg_popup_try_from_wlr_surface(wlr_surface_get_root_surface(surface)) != nullptr;
     }
 
+    // `[input.touchpad] scroll_factor` scales a touchpad's smooth scroll delta before it reaches the focused client.
+    // Reads the live config per event so a successful reload applies on the very next axis; non-touchpads and unset
+    // values stay at identity (1.0). Only the continuous delta is scaled, never the discrete value120 notches.
+    double touchpadScrollFactor(wlr_pointer* pointer) {
+      if (pointer == nullptr || !wlr_input_device_is_libinput(&pointer->base)) {
+        return 1.0;
+      }
+      libinput_device* device = wlr_libinput_get_device_handle(&pointer->base);
+      if (device == nullptr || libinput_device_config_tap_get_finger_count(device) == 0) {
+        return 1.0;
+      }
+      return config().input.touchpad.scrollFactor.value_or(1.0);
+    }
+
     bool surfaceLocalCoordinates(wlr_scene* scene, wlr_surface* target, double lx, double ly, double* sx, double* sy) {
       if (target == nullptr) {
         return false;
@@ -622,7 +636,7 @@ namespace umbriel {
   void Cursor::handleMotion(void* data) {
     auto* event = static_cast<wlr_pointer_motion_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    m_server->notifyInputActivity();
 
     wlr_relative_pointer_manager_v1_send_relative_motion(
         m_server->relativePointerManager(), m_server->seat()->wlr(), static_cast<uint64_t>(event->time_msec) * 1000,
@@ -656,7 +670,7 @@ namespace umbriel {
   void Cursor::handleMotionAbsolute(void* data) {
     auto* event = static_cast<wlr_pointer_motion_absolute_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    m_server->notifyInputActivity();
     if (m_activeConstraint != nullptr && m_activeConstraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
       if (!constraintSurfaceActive()) {
         clearConstraint();
@@ -691,7 +705,11 @@ namespace umbriel {
 
   void Cursor::processButton(uint32_t timeMsec, uint32_t button, wl_pointer_button_state state) {
     noteActivity();
-    m_server->notifyIdleActivity();
+    if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
+      m_server->notifyInputActivity();
+    } else {
+      m_server->notifyIdleActivity();
+    }
     if (state == WL_POINTER_BUTTON_STATE_PRESSED) {
       cancelHotCorner();
       m_server->cancelModifierTap();
@@ -706,19 +724,19 @@ namespace umbriel {
     // swallow their paired release so clients never see an unmatched release.
     if (state == WL_POINTER_BUTTON_STATE_PRESSED && isPassthrough()) {
       const uint32_t modifiers = m_server->keyboardModifiers();
-      const Keybind* bound = m_server->handleMouseBind(button, modifiers);
+      const std::optional<Keybind> bound = m_server->handleMouseBind(button, modifiers);
       // Any press dismisses the cheatsheet, as any key press does, except one that just ran a cheatsheet action. Unlike
       // a key press, an unbound press is consumed: the overlay hides whatever sits under the cursor, so the click that
       // dismisses it must not also reach that surface.
       if (Cheatsheet* sheet = m_server->cheatsheet();
-          sheet != nullptr && sheet->visible() && !(bound != nullptr && isCheatsheetAction(bound->action))) {
+          sheet != nullptr && sheet->visible() && !(bound.has_value() && isCheatsheetAction(bound->action))) {
         sheet->hide();
-        if (bound == nullptr) {
+        if (!bound.has_value()) {
           m_swallowedButtons.push_back(button);
           return;
         }
       }
-      if (bound != nullptr) {
+      if (bound.has_value()) {
         m_swallowedButtons.push_back(button);
         return;
       }
@@ -886,7 +904,11 @@ namespace umbriel {
   void Cursor::handleAxis(void* data) {
     auto* event = static_cast<wlr_pointer_axis_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    if (event->delta == 0 && event->delta_discrete == 0) {
+      m_server->notifyIdleActivity();
+    } else {
+      m_server->notifyInputActivity();
+    }
     m_server->cancelModifierTap();
     cancelHotCorner();
 
@@ -943,8 +965,9 @@ namespace umbriel {
     const int orientation = isVertical ? 0 : 1;
     if (!armed) {
       m_wheelAccum[orientation] = 0;
+      const double scale = touchpadScrollFactor(event->pointer);
       wlr_seat_pointer_notify_axis(
-          m_server->seat()->wlr(), event->time_msec, event->orientation, event->delta, event->delta_discrete,
+          m_server->seat()->wlr(), event->time_msec, event->orientation, event->delta * scale, event->delta_discrete,
           event->source, event->relative_direction
       );
       return;
@@ -1006,7 +1029,7 @@ namespace umbriel {
 
   void Cursor::handleTouchDown(void* data) {
     auto* event = static_cast<wlr_touch_down_event*>(data);
-    m_server->notifyIdleActivity();
+    m_server->notifyInputActivity();
     m_server->cancelModifierTap();
 
     double lx = 0;
@@ -1052,7 +1075,7 @@ namespace umbriel {
 
   void Cursor::handleTouchMotion(void* data) {
     auto* event = static_cast<wlr_touch_motion_event*>(data);
-    m_server->notifyIdleActivity();
+    m_server->notifyInputActivity();
 
     wlr_seat* seat = m_server->seat()->wlr();
     wlr_touch_point* point = wlr_seat_touch_get_point(seat, event->touch_id);
@@ -1420,7 +1443,7 @@ namespace umbriel {
   void Cursor::handleTabletToolAxis(void* data) {
     auto* event = static_cast<wlr_tablet_tool_axis_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    m_server->notifyInputActivity();
     TabletToolState* state = toolState(event->tool);
     const double oldX = m_cursor->x;
     const double oldY = m_cursor->y;
@@ -1460,7 +1483,11 @@ namespace umbriel {
   void Cursor::handleTabletToolProximity(void* data) {
     auto* event = static_cast<wlr_tablet_tool_proximity_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    if (event->state == WLR_TABLET_TOOL_PROXIMITY_IN) {
+      m_server->notifyInputActivity();
+    } else {
+      m_server->notifyIdleActivity();
+    }
     if (event->state == WLR_TABLET_TOOL_PROXIMITY_IN) {
       TabletToolState* state = toolState(event->tool);
       state->x = event->x;
@@ -1497,7 +1524,11 @@ namespace umbriel {
   void Cursor::handleTabletToolTip(void* data) {
     auto* event = static_cast<wlr_tablet_tool_tip_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
+      m_server->notifyInputActivity();
+    } else {
+      m_server->notifyIdleActivity();
+    }
     if (event->state == WLR_TABLET_TOOL_TIP_DOWN) {
       m_server->cancelModifierTap();
     }
@@ -1537,7 +1568,11 @@ namespace umbriel {
   void Cursor::handleTabletToolButton(void* data) {
     auto* event = static_cast<wlr_tablet_tool_button_event*>(data);
     noteActivity();
-    m_server->notifyIdleActivity();
+    if (event->state == WLR_BUTTON_PRESSED) {
+      m_server->notifyInputActivity();
+    } else {
+      m_server->notifyIdleActivity();
+    }
     TabletToolState* state = toolState(event->tool);
     const bool pressed = event->state == WLR_BUTTON_PRESSED;
     if (!state->emulating) {

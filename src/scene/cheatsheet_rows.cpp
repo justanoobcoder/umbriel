@@ -376,6 +376,7 @@ namespace {
   // Merge key: groups keybinds with identical action for stacked display.
   struct MergeKey {
     std::string submap;
+    std::string submapAfter;
     umbriel::KeybindAction action;
     std::string actionLabel;
     uint32_t modifiers;
@@ -384,6 +385,8 @@ namespace {
     bool operator<(const MergeKey& other) const {
       if (submap != other.submap)
         return submap < other.submap;
+      if (submapAfter != other.submapAfter)
+        return submapAfter < other.submapAfter;
       if (action != other.action)
         return action < other.action;
       if (actionLabel != other.actionLabel)
@@ -443,6 +446,7 @@ namespace umbriel {
       std::string actionStr;
       KeybindAction actionType;
       std::string submap;
+      std::string submapAfter;
       // From the first bind in the group (for workspace collapse).
       uint32_t keysym;
       std::string workspaceName;
@@ -460,9 +464,11 @@ namespace umbriel {
 
       std::string chord = buildChordLabel(bind);
       std::string aLabel = actionLabel(bind);
+      const std::string submapAfter = bind.submapAfter.has_value() ? bind.submapAfter->name : std::string{};
 
       MergeKey key{
           .submap = bind.submap,
+          .submapAfter = submapAfter,
           .action = bind.action,
           .actionLabel = aLabel,
           .modifiers = bind.modifiers,
@@ -479,6 +485,7 @@ namespace umbriel {
             .actionStr = std::move(aLabel),
             .actionType = bind.action,
             .submap = bind.submap,
+            .submapAfter = submapAfter,
             .keysym = bind.keysym,
             .workspaceName = workspaceSelectorName(bind),
             .modifiers = bind.modifiers,
@@ -506,12 +513,16 @@ namespace umbriel {
       if (displayAction.size() > 32) {
         displayAction = displayAction.substr(0, 32) + "\xe2\x80\xa6"; // …
       }
+      if (!raw.submapAfter.empty()) {
+        displayAction += " \xe2\x86\x92 " + raw.submapAfter;
+      }
       for (size_t i = 0; i < raw.chords.size(); ++i) {
         rows.push_back({
             .chord = std::move(raw.chords[i]),
             .action = i == 0 ? displayAction : "\xe2\x80\xb3", // ″ ditto
             .actionType = raw.actionType,
             .submap = raw.submap,
+            .submapAfter = raw.submapAfter,
             .spawnBinary = spawn.binary,
             .spawnArgs = spawn.args,
             .keysym = raw.keysym,
@@ -527,11 +538,14 @@ namespace umbriel {
     auto collapseWorkspaceRuns = [&](KeybindAction wsAction) {
       struct RunKey {
         std::string submap;
+        std::string submapAfter;
         uint32_t modifiers;
         bool useMod;
         bool operator<(const RunKey& o) const {
           if (submap != o.submap)
             return submap < o.submap;
+          if (submapAfter != o.submapAfter)
+            return submapAfter < o.submapAfter;
           if (modifiers != o.modifiers)
             return modifiers < o.modifiers;
           return useMod < o.useMod;
@@ -543,7 +557,7 @@ namespace umbriel {
           continue;
         if (!rows[i].submap.empty())
           continue; // submaps handled separately
-        RunKey rk{rows[i].submap, rows[i].modifiers, rows[i].useMod};
+        RunKey rk{rows[i].submap, rows[i].submapAfter, rows[i].modifiers, rows[i].useMod};
         groups[rk].push_back(i);
       }
 
@@ -607,6 +621,9 @@ namespace umbriel {
             + "1\xe2\x80\xa6"
               "9"; // 1…9
         rows[digitIndices[0]].action = std::string(specName) + ": 1-9";
+        if (!rk.submapAfter.empty()) {
+          rows[digitIndices[0]].action += " \xe2\x86\x92 " + rk.submapAfter;
+        }
 
         // Mark remaining digit rows and all KP rows for deletion.
         std::vector<size_t> toRemove;

@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "input/cursor.h"
 #include "input/seat.h"
+#include "input/shortcut_keysym.h"
 #include "input/text_input.h"
 #include "overview/overview.h"
 #include "scene/cheatsheet.h"
@@ -125,6 +126,13 @@ namespace umbriel {
     m_server->notifyKeyboardLayoutIpc();
   }
 
+  wlr_input_method_keyboard_grab_v2* Keyboard::activeInputMethodGrab() const {
+    if (m_server->sessionLocked()) {
+      return nullptr;
+    }
+    return m_server->inputMethodRelay()->grabForKeyboard(m_keyboard);
+  }
+
   Keyboard::~Keyboard() {
     if (m_repeatTimer != nullptr) {
       wl_event_source_remove(m_repeatTimer);
@@ -159,7 +167,7 @@ namespace umbriel {
     cancelRepeat();
     m_server->notifyIdleActivity();
     wlr_seat* seat = m_server->seat()->wlr();
-    wlr_input_method_keyboard_grab_v2* grab = m_server->inputMethodRelay()->grabForKeyboard(m_keyboard);
+    wlr_input_method_keyboard_grab_v2* grab = activeInputMethodGrab();
     if (grab != nullptr) {
       wlr_input_method_keyboard_grab_v2_set_keyboard(grab, m_keyboard);
       wlr_input_method_keyboard_grab_v2_send_modifiers(grab, &m_keyboard->modifiers);
@@ -173,17 +181,19 @@ namespace umbriel {
 
   void Keyboard::handleKey(void* data) {
     auto* event = static_cast<wlr_keyboard_key_event*>(data);
-    m_server->notifyIdleActivity();
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+      m_server->notifyInputActivity();
+    } else {
+      m_server->notifyIdleActivity();
+    }
     wlr_seat* seat = m_server->seat()->wlr();
 
     uint32_t keycode = event->keycode + 8;
     const xkb_keysym_t* syms = nullptr;
     int nsyms = xkb_state_key_get_syms(m_keyboard->xkb_state, keycode, &syms);
-    const xkb_keysym_t* rawSyms = nullptr;
     xkb_keymap* keymap = xkb_state_get_keymap(m_keyboard->xkb_state);
     const xkb_layout_index_t layout = xkb_state_key_get_layout(m_keyboard->xkb_state, keycode);
-    const int nraw = xkb_keymap_key_get_syms_by_level(keymap, keycode, layout, 0, &rawSyms);
-    const uint32_t rawSym = nraw > 0 ? rawSyms[0] : XKB_KEY_NoSymbol;
+    const uint32_t rawSym = rawShortcutKeysym(keymap, keycode, layout);
     const bool modifierOnly = nsyms > 0 && syms[0] >= XKB_KEY_Shift_L && syms[0] <= XKB_KEY_Hyper_R;
 
     bool handled = false;
@@ -229,18 +239,18 @@ namespace umbriel {
           quitConfirmConsumed = true;
         }
       }
-      const Keybind* matched = nullptr;
+      std::optional<Keybind> matched;
       if (!quitConfirmConsumed) {
         for (int i = 0; i < nsyms; ++i) {
-          const Keybind* result = m_server->handleKeybind(syms[i], rawSym, modifiers);
-          if (result != nullptr) {
-            matched = result;
+          std::optional<Keybind> result = m_server->handleKeybind(syms[i], rawSym, modifiers);
+          if (result.has_value()) {
+            matched = std::move(result);
             handled = true;
             break;
           }
         }
       }
-      if (matched != nullptr) {
+      if (matched.has_value()) {
         armRepeat(*matched, event->keycode);
       }
       // Unbound plain keys drive overview navigation instead of reaching clients, unless a layer surface (launcher,
@@ -257,7 +267,7 @@ namespace umbriel {
       // Any non-modifier key press dismisses the cheatsheet, except the key
       // that just toggled it.
       if (Cheatsheet* sheet = m_server->cheatsheet(); sheet != nullptr && sheet->visible()) {
-        const bool cheatsheetBind = matched != nullptr && isCheatsheetAction(matched->action);
+        const bool cheatsheetBind = matched.has_value() && isCheatsheetAction(matched->action);
         if (!cheatsheetBind && !modifierOnly) {
           sheet->hide();
         }
@@ -270,7 +280,7 @@ namespace umbriel {
     }
 
     if (!handled) {
-      wlr_input_method_keyboard_grab_v2* grab = m_server->inputMethodRelay()->grabForKeyboard(m_keyboard);
+      wlr_input_method_keyboard_grab_v2* grab = activeInputMethodGrab();
       if (grab != nullptr) {
         wlr_input_method_keyboard_grab_v2_set_keyboard(grab, m_keyboard);
         wlr_input_method_keyboard_grab_v2_send_key(grab, event->time_msec, event->keycode, event->state);

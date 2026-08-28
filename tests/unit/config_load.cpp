@@ -2,6 +2,7 @@
 #include "config/store.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -264,6 +265,25 @@ UMBRIEL_TEST(scrollingDefaultWidthIsOptional) {
   CHECK(!store.config().layout.scrolling.defaultWidthFraction.has_value());
 }
 
+UMBRIEL_TEST(expandSingleColumnParsesAndDefaultsToFalse) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("");
+
+  CHECK(store.reload().success);
+  CHECK(!store.config().layout.scrolling.expandSingleColumn);
+
+  file.write("[layout.scrolling]\nexpand_single_column = true\n");
+  CHECK(store.reload().success);
+  CHECK(store.config().layout.scrolling.expandSingleColumn);
+
+  file.write("[layout.scrolling]\nexpand_single_column = false\n");
+  CHECK(store.reload().success);
+  CHECK(!store.config().layout.scrolling.expandSingleColumn);
+}
+
 UMBRIEL_TEST(modKeyIsUserConfigurable) {
   const TempConfig file;
   ConfigStore& store = umbriel::configStore();
@@ -305,6 +325,47 @@ UMBRIEL_TEST(keybindTableLoadsAllowWhenLocked) {
   CHECK(allowedWhenLocked);
   CHECK(defaultsToBlocked);
   CHECK(!containsDiagnostic(store, "allow_when_locked"));
+}
+
+UMBRIEL_TEST(keybindTableLoadsPostActionSubmaps) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write(
+      "[keybinds]\n"
+      "\"submap[outer],1\" = { action = \"workspace-switch:2\", submap = \"reset\" }\n"
+      "\"submap[outer],2\" = { action = \"workspace-switch:3\", submap = \"inner\", repeat = true }\n"
+      "\"submap[outer],3\" = { action = \"workspace-switch:4\", repeat = true }\n"
+  );
+  CHECK(store.reload().success);
+
+  bool resets = false;
+  bool entersInner = false;
+  bool remainsPersistent = false;
+  for (const auto& bind : store.config().keybinds) {
+    if (!bind.submapAfter.has_value()) {
+      remainsPersistent = remainsPersistent || (bind.submap == "outer" && bind.repeat);
+      continue;
+    }
+    CHECK(!bind.repeat);
+    resets = resets || umbriel::isSubmapReset(*bind.submapAfter);
+    entersInner = entersInner || bind.submapAfter->name == "inner";
+  }
+  CHECK(resets);
+  CHECK(entersInner);
+  CHECK(remainsPersistent);
+  CHECK(!containsDiagnostic(store, "submap"));
+
+  file.write(
+      "[keybinds]\n"
+      "\"submap[outer],1\" = { action = \"workspace-switch:2\", submap = \"\" }\n"
+      "\"submap[outer],2\" = { action = \"workspace-switch:3\", submap = \"disable\" }\n"
+      "\"submap[outer],3\" = { action = \"workspace-switch:4\", submap = \"invalid]name\" }\n"
+  );
+  CHECK(store.reload().success);
+  CHECK(containsDiagnostic(store, "submap must be a non-empty name"));
+  CHECK(std::ranges::none_of(store.config().keybinds, [](const auto& bind) { return bind.submap == "outer"; }));
 }
 
 UMBRIEL_TEST(hotCornersLoadActionsAndValidate) {
@@ -350,6 +411,60 @@ UMBRIEL_TEST(overviewBackgroundBlurLoads) {
   file.write("[overview]\nbackground_blur = false\n");
   CHECK(store.reload().success);
   CHECK(!store.config().overview.backgroundBlur);
+}
+
+UMBRIEL_TEST(overviewShortcutConfigurationLoads) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[overview]\nshortcuts = false\nshortcut_keys = \"asdf\"\nbadge_color = \"#12345678\"\n");
+  CHECK(store.reload().success);
+  CHECK(!store.config().overview.shortcuts);
+  CHECK_EQ(store.config().overview.shortcutKeys, std::string{"asdf"});
+  CHECK(store.config().overview.badgeColor.has_value());
+  const std::array<float, 4> badgeColor = store.config().overview.badgeColor.value_or(std::array<float, 4>{});
+  CHECK_EQ(badgeColor[0], 18.0F / 255.0F);
+  CHECK_EQ(badgeColor[1], 52.0F / 255.0F);
+  CHECK_EQ(badgeColor[2], 86.0F / 255.0F);
+  CHECK_EQ(badgeColor[3], 120.0F / 255.0F);
+}
+
+UMBRIEL_TEST(overviewShortcutKeysRejectInvalidValues) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[overview]\nshortcut_keys = \"a\"\n");
+  CHECK(store.reload().success);
+  CHECK_EQ(store.config().overview.shortcutKeys, std::string{"1234567890"});
+  CHECK(containsDiagnostic(store, "expected at least 2 characters"));
+
+  file.write("[overview]\nshortcut_keys = \"aA\"\n");
+  CHECK(store.reload().success);
+  CHECK_EQ(store.config().overview.shortcutKeys, std::string{"1234567890"});
+  CHECK(containsDiagnostic(store, "duplicate key"));
+
+  file.write("[overview]\nshortcut_keys = \"a b\"\n");
+  CHECK(store.reload().success);
+  CHECK_EQ(store.config().overview.shortcutKeys, std::string{"1234567890"});
+  CHECK(containsDiagnostic(store, "invalid character 0x20"));
+
+  file.write("[overview]\nshortcut_keys = 12\n");
+  CHECK(store.reload().success);
+  CHECK_EQ(store.config().overview.shortcutKeys, std::string{"1234567890"});
+  CHECK(containsDiagnostic(store, "expected string"));
+}
+
+UMBRIEL_TEST(overviewBadgeColorRejectsInvalidValues) {
+  const TempConfig file;
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+
+  file.write("[overview]\nbadge_color = \"not-a-color\"\n");
+  CHECK(store.reload().success);
+  CHECK(!store.config().overview.badgeColor.has_value());
+  CHECK(containsDiagnostic(store, "overview.badge_color (invalid color"));
 }
 
 UMBRIEL_TEST(cornerRadiusClampsToItsRange) {
@@ -711,6 +826,8 @@ tap = true
 natural_scroll = true
 accel_profile = "adaptive"
 sensitivity = 0.1
+scroll_factor = 1.5
+disable_while_typing = true
 
 [input.mouse]
 accel_profile = "custom 0.2 0.0 0.5 1.0 2.0"
@@ -729,6 +846,7 @@ tap = false
 natural_scroll = false
 accel_profile = "flat"
 sensitivity = -0.5
+disable_while_typing = false
 
 [[input.device]]
 name = "Acme Gaming Mouse"
@@ -752,6 +870,8 @@ sensitivity = -0.5
     CHECK(input.touchpad.accelProfile->kind == umbriel::AccelProfile::Kind::Adaptive);
   }
   CHECK(input.touchpad.sensitivity == std::optional<double>(0.1));
+  CHECK(input.touchpad.scrollFactor == std::optional<double>(1.5));
+  CHECK(input.touchpad.disableWhileTyping == std::optional<bool>(true));
   CHECK_EQ(input.devices.size(), size_t{3});
 
   const auto* keyboard = input.findDevice("Acme Split Keyboard");
@@ -773,6 +893,7 @@ sensitivity = -0.5
       CHECK(touchpad->accelProfile->kind == umbriel::AccelProfile::Kind::Flat);
     }
     CHECK(touchpad->sensitivity == std::optional<double>(-0.5));
+    CHECK(touchpad->disableWhileTyping == std::optional<bool>(false));
   }
 
   const auto* mouse = input.findDevice("Acme Gaming Mouse");
@@ -799,9 +920,24 @@ UMBRIEL_TEST(touchpadAccelerationDefaultsToUnset) {
   CHECK(!defaults.input.touchpad.sensitivity.has_value());
 }
 
+UMBRIEL_TEST(touchpadScrollFactorDefaultsToUnset) {
+  const umbriel::Config defaults;
+  CHECK(!defaults.input.touchpad.scrollFactor.has_value());
+}
+
+UMBRIEL_TEST(touchpadDisableWhileTypingDefaultsToUnset) {
+  const umbriel::Config defaults;
+  CHECK(!defaults.input.touchpad.disableWhileTyping.has_value());
+}
+
 UMBRIEL_TEST(touchpadTapDefaultsToEnabled) {
   const umbriel::Config defaults;
   CHECK(defaults.input.touchpad.tap == std::optional<bool>(true));
+}
+
+UMBRIEL_TEST(cursorFollowsFocusDefaultsToDisabled) {
+  const umbriel::Config defaults;
+  CHECK(!defaults.input.cursor.followsFocus);
 }
 
 UMBRIEL_TEST(hardwareCursorCanBeDisabled) {
@@ -809,6 +945,7 @@ UMBRIEL_TEST(hardwareCursorCanBeDisabled) {
   file.write(R"(
 [input.cursor]
 hardware_cursor = false
+follows_focus = true
 hide_when_typing = true
 )");
 
@@ -818,8 +955,10 @@ hide_when_typing = true
 
   CHECK(result.success);
   CHECK(!store.config().input.cursor.hardwareCursor);
+  CHECK(store.config().input.cursor.followsFocus);
   CHECK(store.config().input.cursor.hideWhenTyping);
   CHECK(!containsDiagnostic(store, "unknown key input.cursor.hardware_cursor"));
+  CHECK(!containsDiagnostic(store, "unknown key input.cursor.follows_focus"));
   CHECK(!containsDiagnostic(store, "unknown key input.cursor.hide_when_typing"));
 }
 
