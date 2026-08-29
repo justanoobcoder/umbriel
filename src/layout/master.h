@@ -14,6 +14,11 @@ namespace umbriel {
 
   class MasterStackLayout final : public Layout {
   public:
+    struct Area {
+      std::vector<View*> views;
+      std::vector<double> weights;
+    };
+
     [[nodiscard]] LayoutMode mode() const override { return LayoutMode::Master; }
 
     [[nodiscard]] const std::vector<Column>& columns() const override { return m_columns; }
@@ -27,6 +32,9 @@ namespace umbriel {
     bool consumeLeft(View* view) override;
     bool expelRight(View* view) override;
     bool moveViewVertical(View* view, int direction) override;
+    bool swapViews(View* a, View* b) override;
+    bool promoteFromStack();
+    bool demoteToStack();
     void removeView(View* view) override;
     void moveColumn(int from, int to) override;
     void arrange(const wlr_box& usable) override;
@@ -44,17 +52,14 @@ namespace umbriel {
     bool setWidthFraction(int columnIndex, double fraction) override;
     void clearFullWidthState(int columnIndex) override;
     [[nodiscard]] double widthFraction(int columnIndex) const override;
+    [[nodiscard]] double heightFraction(const View* view) const override;
+    bool setHeightFraction(View* view, double fraction) override;
 
     [[nodiscard]] uint32_t resizeEdgesAt(const View* view, double cx, double cy) const override;
     [[nodiscard]] uint32_t sanitizeResizeEdges(const View* view, uint32_t edges) const override;
     std::unique_ptr<ResizeGrab> beginResize(View* view, uint32_t edges, const wlr_box& usable) override;
 
   private:
-    struct Area {
-      std::vector<View*> views;
-      std::vector<double> weights;
-    };
-
     [[nodiscard]] double masterFrac() const;
     [[nodiscard]] bool masterIsLeft() const;
     [[nodiscard]] Area* areaOf(const View* view);

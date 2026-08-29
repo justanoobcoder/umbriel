@@ -119,6 +119,15 @@ namespace umbriel {
     ColumnMoveToLast,
     WorkspaceBackAndForth,
     WindowMoveToWorkspaceBackAndForth,
+    WindowFocusPrevious,
+    WindowSwapNext,
+    WindowSwapPrevious,
+    MasterCountIncrease,
+    MasterCountDecrease,
+    WindowSetHeight,
+    WindowModifyHeight,
+    WindowFocusLast,
+    WindowConsumeOrExpel,
     Count,
   };
 

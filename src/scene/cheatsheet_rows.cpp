@@ -290,9 +290,11 @@ namespace {
     case A::WindowFocusOrOutputUp:
     case A::WindowFocusOrOutputDown:
     case A::WindowFocusNext:
+    case A::WindowFocusPrevious:
     case A::WindowFocusId:
     case A::WindowFocusWarpId:
     case A::WindowFocusSwitchFloating:
+    case A::WindowFocusLast:
       return Group::Focus;
     case A::ColumnMoveLeft:
     case A::ColumnMoveRight:
@@ -313,6 +315,9 @@ namespace {
     case A::WindowCycleWidthBack:
     case A::WindowSetWidth:
     case A::WindowModifyWidth:
+    case A::WindowSetHeight:
+    case A::WindowModifyHeight:
+    case A::WindowConsumeOrExpel:
     case A::WindowCenter:
     case A::LayoutScrollLeft:
     case A::LayoutScrollRight:
@@ -324,6 +329,10 @@ namespace {
     case A::ColumnMoveToOutputRight:
     case A::ColumnMoveToOutputUp:
     case A::ColumnMoveToOutputDown:
+    case A::WindowSwapNext:
+    case A::WindowSwapPrevious:
+    case A::MasterCountIncrease:
+    case A::MasterCountDecrease:
       return Group::MoveSize;
     case A::WindowClose:
     case A::ToggleFloating:

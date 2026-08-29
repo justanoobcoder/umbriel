@@ -17,6 +17,7 @@ struct wlr_scene_tree;
 namespace umbriel {
 
   class DwindleLayout;
+  class MasterStackLayout;
   class Output;
   class ScrollingLayout;
   class Server;
@@ -54,6 +55,7 @@ namespace umbriel {
     // At least 1, so callers can divide by it.
     [[nodiscard]] int scrollViewportExtent() const;
     [[nodiscard]] DwindleLayout* dwindleLayout();
+    [[nodiscard]] MasterStackLayout* masterLayout();
     [[nodiscard]] const ResolvedLayoutConfig& layoutConfig() const { return m_layoutConfig; }
     [[nodiscard]] LayoutMode layoutMode() const { return m_layoutMode; }
     // Runtime layout override set by workspace-set-layout. Empty = the configured mode applies. A config reload clears
@@ -77,6 +79,9 @@ namespace umbriel {
     void addView(View* view, bool attachToLayout = true);
     View* removeView(View* view, bool reconcile = true);
     void layoutAttach(View* view, std::optional<double> initialWidth = std::nullopt);
+    // Predict the first configure by applying the same insertion and full-width
+    // transition that the mapped path will use on the authoritative layout.
+    [[nodiscard]] Layout::InitialSize initialMaximizedSize(View* view, const wlr_box& usable) const;
     void layoutDetach(View* view, bool animate = false);
     void arrange(bool animate = true);
     // Record that the layout is stale instead of rebuilding it now. The work runs once, before the next frame, however
@@ -93,18 +98,24 @@ namespace umbriel {
     [[nodiscard]] View* focusFirstColumn() const;
     [[nodiscard]] View* focusLastColumn() const;
     [[nodiscard]] View* focusReplacementForRemoval(const View* view) const;
+    [[nodiscard]] View* cycleFocusTarget(int direction) const;
     bool moveFocusedColumn(int direction);
     bool moveFocusedColumnFirst();
     bool moveFocusedColumnLast();
     bool consumeFocusedLeft();
     bool expelFocusedRight();
     bool moveFocusedVertical(int direction);
+    bool swapFocusedInCycle(int direction);
+    bool increaseMasterCount();
+    bool decreaseMasterCount();
     bool cycleFocusedWidth(int direction);
     bool setFocusedWidth(double fraction);
     bool centerFocusedColumn();
     // Incremental width change: apply `delta` to the focused column's current
     // width fraction, clamped to [0.1, 1.0].
     bool modifyFocusedWidth(double delta);
+    bool setFocusedHeight(double fraction);
+    bool modifyFocusedHeight(double delta);
     bool toggleFocusedFullWidth();
     bool toggleFocusedMaximizedToEdges();
     bool toggleFocusedFullscreen();
@@ -120,12 +131,13 @@ namespace umbriel {
     void applyLayoutConfig(ResolvedLayoutConfig layoutConfig);
     void rename(std::string name, size_t index);
 
-    [[nodiscard]] std::vector<View*> allViews() const { return m_views; }
+    [[nodiscard]] const std::vector<View*>& allViews() const noexcept { return m_views; }
     [[nodiscard]] bool hasViews() const { return !m_views.empty(); }
 
   private:
     void applyPositions(bool animate);
     [[nodiscard]] wlr_box tiledTargetBox(const View* view, const wlr_box& usable) const;
+    [[nodiscard]] int layoutAttachIndex(const View* view) const;
     // Pull the scroll offset back into [0, maxScroll]. Only for removals: a
     // touchpad swipe overscrolls on purpose.
     void clampScrollToRange();

@@ -300,6 +300,27 @@ UMBRIEL_TEST(rejectsInvalidWidthDeltas) {
   CHECK(!parseAction("window-modify-width:nan", bind));
 }
 
+UMBRIEL_TEST(parsesHeightActions) {
+  Keybind bind;
+  CHECK(parseAction("window-set-height:0.5", bind));
+  CHECK(bind.action == KeybindAction::WindowSetHeight);
+  const auto* height = umbriel::payloadIf<umbriel::WidthArg>(bind);
+  CHECK(height != nullptr);
+  CHECK(height != nullptr && std::fabs(height->fraction - 0.5) < 1e-9);
+
+  CHECK(parseAction("window-modify-height:-0.2", bind));
+  CHECK(bind.action == KeybindAction::WindowModifyHeight);
+  height = umbriel::payloadIf<umbriel::WidthArg>(bind);
+  CHECK(height != nullptr && std::fabs(height->fraction + 0.2) < 1e-9);
+
+  CHECK(parseAction("window-modify-height:+0.1", bind));
+  height = umbriel::payloadIf<umbriel::WidthArg>(bind);
+  CHECK(height != nullptr && std::fabs(height->fraction - 0.1) < 1e-9);
+
+  CHECK(!parseAction("window-set-height:0.05", bind));
+  CHECK(!parseAction("window-modify-height:0", bind));
+}
+
 UMBRIEL_TEST(parsesLayoutModeActions) {
   Keybind bind;
   CHECK(parseAction("workspace-set-layout:scrolling", bind));
@@ -370,6 +391,22 @@ UMBRIEL_TEST(parsesArgumentFreeNewActions) {
   CHECK(parseAction("column-move-to-last", bind));
   CHECK(bind.action == KeybindAction::ColumnMoveToLast);
 
+  CHECK(parseAction("window-focus-previous", bind));
+  CHECK(bind.action == KeybindAction::WindowFocusPrevious);
+  CHECK(parseAction("window-swap-next", bind));
+  CHECK(bind.action == KeybindAction::WindowSwapNext);
+  CHECK(parseAction("window-swap-previous", bind));
+  CHECK(bind.action == KeybindAction::WindowSwapPrevious);
+  CHECK(parseAction("master-count-increase", bind));
+  CHECK(bind.action == KeybindAction::MasterCountIncrease);
+  CHECK(parseAction("master-count-decrease", bind));
+  CHECK(bind.action == KeybindAction::MasterCountDecrease);
+
+  CHECK(parseAction("window-focus-last", bind));
+  CHECK(bind.action == KeybindAction::WindowFocusLast);
+  CHECK(parseAction("window-consume-or-expel", bind));
+  CHECK(bind.action == KeybindAction::WindowConsumeOrExpel);
+
   // Argument-free actions reject arguments.
   CHECK(!parseAction("workspace-next:1", bind));
   CHECK(!parseAction("window-move-to-workspace-next:1", bind));
@@ -379,6 +416,8 @@ UMBRIEL_TEST(parsesArgumentFreeNewActions) {
   CHECK(!parseAction("output-focus-left:DP-1", bind));
   CHECK(!parseAction("window-center:x", bind));
   CHECK(!parseAction("window-toggle-maximize-to-edges:x", bind));
+  CHECK(!parseAction("window-focus-last:x", bind));
+  CHECK(!parseAction("window-consume-or-expel:x", bind));
 }
 
 UMBRIEL_TEST(parsesWorkspaceSelectors) {

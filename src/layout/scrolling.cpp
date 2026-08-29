@@ -486,6 +486,31 @@ namespace umbriel {
     return true;
   }
 
+  bool ScrollingLayout::swapViews(View* a, View* b) {
+    if (a == b) {
+      return false;
+    }
+    const int firstColumn = columnOf(a);
+    const int firstRow = rowOf(a);
+    const int secondColumn = columnOf(b);
+    const int secondRow = rowOf(b);
+    if (firstColumn < 0 || firstRow < 0 || secondColumn < 0 || secondRow < 0) {
+      return false;
+    }
+    std::swap(
+        m_columns[static_cast<size_t>(firstColumn)].views[static_cast<size_t>(firstRow)],
+        m_columns[static_cast<size_t>(secondColumn)].views[static_cast<size_t>(secondRow)]
+    );
+    for (Target& target : m_targets) {
+      if (target.view == a) {
+        target.view = b;
+      } else if (target.view == b) {
+        target.view = a;
+      }
+    }
+    return true;
+  }
+
   void ScrollingLayout::removeView(View* view) {
     const int columnIndex = columnOf(view);
     if (columnIndex < 0) {
@@ -748,6 +773,35 @@ namespace umbriel {
     return m_columns[static_cast<size_t>(columnIndex)].widthFrac;
   }
 
+  double ScrollingLayout::heightFraction(const View* view) const {
+    const int columnIndex = columnOf(view);
+    if (columnIndex < 0) {
+      return 1.0;
+    }
+    const Column& column = m_columns[static_cast<size_t>(columnIndex)];
+    if (column.views.size() <= 1) {
+      return 1.0;
+    }
+    const int row = rowOf(view);
+    return std::max(kMinHeightWeight, heightWeight(columnIndex, row)) / columnTotalWeight(column);
+  }
+
+  bool ScrollingLayout::setHeightFraction(View* view, double fraction) {
+    const int columnIndex = columnOf(view);
+    if (columnIndex < 0) {
+      return false;
+    }
+    const Column& column = m_columns[static_cast<size_t>(columnIndex)];
+    if (column.views.size() <= 1) {
+      return false;
+    }
+    const int row = rowOf(view);
+    const double oldWeight = std::max(kMinHeightWeight, heightWeight(columnIndex, row));
+    const double others = columnTotalWeight(column) - oldWeight;
+    const double target = std::clamp(fraction, 0.1, 0.95);
+    return setHeightWeight(columnIndex, row, target * others / (1.0 - target));
+  }
+
   bool ScrollingLayout::setRowBoundary(int columnIndex, int upperRow, double upperWeight, double lowerWeight) {
     if (columnIndex < 0 || columnIndex >= static_cast<int>(m_columns.size())) {
       return false;
@@ -840,6 +894,9 @@ namespace umbriel {
 
       void applyDelta(double dx, double dy, const wlr_box& usable) override {
         ScrollingLayout& layout = *m_layout;
+        if (m_column < 0 || m_column >= static_cast<int>(layout.columns().size())) {
+          return;
+        }
         const double dPrimary = m_vertical ? dy : dx;
         const double dCross = m_vertical ? dx : dy;
         const uint32_t primaryStartEdge = m_vertical ? WLR_EDGE_TOP : WLR_EDGE_LEFT;

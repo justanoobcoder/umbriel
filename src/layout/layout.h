@@ -153,6 +153,7 @@ namespace umbriel {
     virtual bool consumeLeft(View* view) = 0;
     virtual bool expelRight(View* view) = 0;
     virtual bool moveViewVertical(View* view, int direction) = 0;
+    virtual bool swapViews(View* a, View* b) = 0;
     virtual void removeView(View* view) = 0;
     virtual void moveColumn(int from, int to) = 0;
     virtual void arrange(const wlr_box& usable) = 0;
@@ -184,6 +185,12 @@ namespace umbriel {
     virtual bool setWidthFraction(int columnIndex, double fraction) = 0;
     virtual void clearFullWidthState(int columnIndex) = 0;
     [[nodiscard]] virtual double widthFraction(int columnIndex) const = 0;
+
+    // Height of `view` as a fraction of its column's stacking extent. 1.0 when the
+    // view is alone on its stacking axis.
+    [[nodiscard]] virtual double heightFraction(const View* view) const = 0;
+    // Returns false when the view is not tiled here or is alone on its stacking axis.
+    virtual bool setHeightFraction(View* view, double fraction) = 0;
 
     // Interactive resize
     // Edges grabbable at a pointer position (0 = none). Base = not resizable.

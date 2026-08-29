@@ -5,6 +5,7 @@
 #include "core/log.h"
 #include "input/cursor.h"
 #include "layout/dwindle.h"
+#include "layout/master.h"
 #include "layout/scrolling.h"
 #include "output/output.h"
 #include "overview/overview.h"
@@ -106,6 +107,10 @@ namespace umbriel {
 
   DwindleLayout* Workspace::dwindleLayout() {
     return m_layoutMode == LayoutMode::Dwindle ? static_cast<DwindleLayout*>(m_layout.get()) : nullptr;
+  }
+
+  MasterStackLayout* Workspace::masterLayout() {
+    return m_layoutMode == LayoutMode::Master ? dynamic_cast<MasterStackLayout*>(m_layout.get()) : nullptr;
   }
 
   const ScrollingLayout* Workspace::scrollingLayout() const {
@@ -222,10 +227,7 @@ namespace umbriel {
     return replacement;
   }
 
-  void Workspace::layoutAttach(View* view, std::optional<double> initialWidth) {
-    if (view == nullptr || !view->mapped() || !view->tiled() || m_layout->columnOf(view) >= 0) {
-      return;
-    }
+  int Workspace::layoutAttachIndex(const View* view) const {
     int focusedColumn = m_layout->columnOf(m_focusedView);
     if (focusedColumn < 0 && m_group != nullptr) {
       for (const auto& entry : m_group->server()->registry().all()) {
@@ -238,7 +240,14 @@ namespace umbriel {
         }
       }
     }
-    const int index = focusedColumn >= 0 ? focusedColumn + 1 : static_cast<int>(m_layout->columns().size());
+    return focusedColumn >= 0 ? focusedColumn + 1 : static_cast<int>(m_layout->columns().size());
+  }
+
+  void Workspace::layoutAttach(View* view, std::optional<double> initialWidth) {
+    if (view == nullptr || !view->mapped() || !view->tiled() || m_layout->columnOf(view) >= 0) {
+      return;
+    }
+    const int index = layoutAttachIndex(view);
     m_layout->insertView(view, index);
     if (ScrollingLayout* scrolling = scrollingLayout(); scrolling != nullptr) {
       const int column = scrolling->columnOf(view);
@@ -256,6 +265,25 @@ namespace umbriel {
       }
     }
     markArrange(true);
+  }
+  Layout::InitialSize Workspace::initialMaximizedSize(View* view, const wlr_box& usable) const {
+    LayoutCapture capture = m_layout->captureState();
+    std::unique_ptr<Layout> preview = createLayout(m_layout->mode());
+    preview->setConfig(&m_layoutConfig);
+    preview->setConstraints(&viewLayoutConstraints);
+    if (capture.snapshot == nullptr || !preview->restoreState(*capture.snapshot, capture.members)) {
+      kLog.error("failed to restore layout while resolving initial maximized size");
+      return m_layout->initialSize(usable, 1.0, m_focusedView);
+    }
+
+    preview->insertView(view, layoutAttachIndex(view));
+    const int column = preview->columnOf(view);
+    if (column >= 0 && !preview->isFullWidth(column)) {
+      preview->toggleFullWidth(column);
+    }
+    preview->arrange(usable);
+    const wlr_box target = preview->targetBox(view);
+    return {.width = target.width, .height = target.height};
   }
 
   void Workspace::layoutDetach(View* view, bool animate) {
@@ -671,6 +699,68 @@ namespace umbriel {
     return nullptr;
   }
 
+  View* Workspace::cycleFocusTarget(int direction) const {
+    std::vector<View*> ring;
+    for (const Column& column : m_layout->columns()) {
+      ring.insert(ring.end(), column.views.begin(), column.views.end());
+    }
+    ring.insert(ring.end(), m_floatingStack.begin(), m_floatingStack.end());
+    if (ring.size() < 2) {
+      return nullptr;
+    }
+
+    const auto focused = std::ranges::find(ring, m_focusedView);
+    if (focused == ring.end()) {
+      return direction > 0 ? ring.front() : ring.back();
+    }
+    const auto index = static_cast<std::ptrdiff_t>(focused - ring.begin());
+    const auto count = static_cast<std::ptrdiff_t>(ring.size());
+    const auto target = (index + direction % count + count) % count;
+    return ring[static_cast<size_t>(target)];
+  }
+
+  bool Workspace::swapFocusedInCycle(int direction) {
+    std::vector<View*> ring;
+    for (const Column& column : m_layout->columns()) {
+      ring.insert(ring.end(), column.views.begin(), column.views.end());
+    }
+    if (ring.size() < 2) {
+      return false;
+    }
+
+    const auto focused = std::ranges::find(ring, m_focusedView);
+    if (focused == ring.end()) {
+      return false;
+    }
+    const auto index = static_cast<std::ptrdiff_t>(focused - ring.begin());
+    const auto count = static_cast<std::ptrdiff_t>(ring.size());
+    const auto target = (index + direction % count + count) % count;
+    if (!m_layout->swapViews(m_focusedView, ring[static_cast<size_t>(target)])) {
+      return false;
+    }
+    markArrange();
+    ensureFocusedVisible();
+    return true;
+  }
+
+  bool Workspace::increaseMasterCount() {
+    MasterStackLayout* master = masterLayout();
+    if (master == nullptr || !master->promoteFromStack()) {
+      return false;
+    }
+    markArrange();
+    return true;
+  }
+
+  bool Workspace::decreaseMasterCount() {
+    MasterStackLayout* master = masterLayout();
+    if (master == nullptr || !master->demoteToStack()) {
+      return false;
+    }
+    markArrange();
+    return true;
+  }
+
   bool Workspace::moveLaneAlongStrip(int direction) {
     View* destination = focusAlongStrip(direction);
     if (destination == nullptr) {
@@ -778,6 +868,19 @@ namespace umbriel {
     return true;
   }
 
+  bool Workspace::setFocusedHeight(double fraction) {
+    if (m_focusedView != nullptr && m_focusedView->maximizedToEdges()) {
+      m_focusedView->setMaximizedToEdges(false);
+    }
+    if (!m_layout->setHeightFraction(m_focusedView, fraction)) {
+      return false;
+    }
+    wlr_xdg_toplevel_set_maximized(m_focusedView->toplevel(), false);
+    ensureFocusedVisible();
+    markArrange();
+    return true;
+  }
+
   bool Workspace::centerFocusedColumn() {
     ScrollingLayout* scrolling = scrollingLayout();
     if (scrolling == nullptr || m_focusedView == nullptr) {
@@ -799,6 +902,12 @@ namespace umbriel {
     // Clamp here, not in the layouts: ScrollingLayout clamps internally but
     // DwindleLayout does not, and both must land in [0.1, 1.0].
     return setFocusedWidth(std::clamp(m_layout->widthFraction(column) + delta, 0.1, 1.0));
+  }
+
+  bool Workspace::modifyFocusedHeight(double delta) {
+    // Clamp here, not in the layouts: DwindleLayout does not clamp the overall
+    // fraction, and every layout must land in [0.1, 1.0].
+    return setFocusedHeight(std::clamp(m_layout->heightFraction(m_focusedView) + delta, 0.1, 1.0));
   }
 
   bool Workspace::toggleFocusedFullWidth() {
@@ -1202,7 +1311,10 @@ namespace umbriel {
         removed->setActive(false);
         replacementActive = fallback;
       }
-      for (View* view : removed->allViews()) {
+      // setWorkspace() erases from the source workspace's view list, so relocate from a snapshot: allViews() hands
+      // back the live vector and iterating it here would invalidate the iterator on the first move.
+      const std::vector<View*> relocating = removed->allViews();
+      for (View* view : relocating) {
         view->setWorkspace(fallback);
         ++relocatedViews;
       }
