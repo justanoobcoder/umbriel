@@ -201,6 +201,11 @@ preserve_split = false
   CHECK(containsDiagnostic(store, "unknown key general.prefer_no_csd"));
 }
 
+UMBRIEL_TEST(backgroundDefaultsOpaque) {
+  const umbriel::Config config;
+  CHECK_EQ(config.colors.background[3], 1.0F);
+}
+
 UMBRIEL_TEST(dwindlePreserveSplitDefaultsToFalse) {
   const TempConfig file;
   file.write("[layout]\n");
@@ -880,6 +885,8 @@ focus_on_activate = true
 match.app_id = "^game$"
 default_focused = false
 default_pinned = true
+default_scrolling_column = "browser-stack"
+default_scrolling_column_order = 20
 focus_on_activate = false
 default_position = { x = 32, y = 48, anchor = "bottom_left" }
 
@@ -899,6 +906,8 @@ default_position = { x = 0, y = 0 }
   CHECK(!*store.config().windowRules[0].defaultFocused);
   CHECK(store.config().windowRules[0].defaultPinned.has_value());
   CHECK(*store.config().windowRules[0].defaultPinned);
+  CHECK(store.config().windowRules[0].defaultScrollingColumn == "browser-stack");
+  CHECK(store.config().windowRules[0].defaultScrollingColumnOrder == 20);
   CHECK(store.config().windowRules[0].focusOnActivate.has_value());
   CHECK(!*store.config().windowRules[0].focusOnActivate);
   CHECK(store.config().windowRules[0].defaultPosition.has_value());

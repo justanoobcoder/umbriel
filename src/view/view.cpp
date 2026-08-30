@@ -1683,6 +1683,8 @@ namespace umbriel {
     m_initialRules = rule;
     m_initialRulesXdgTag = m_xdgTag;
     m_initialRulesContentType = m_contentType;
+    m_namedScrollingColumnName = rule.defaultScrollingColumn;
+    m_namedScrollingColumnOrder = rule.defaultScrollingColumnOrder;
     if (rule.defaultFloating) {
       m_tiled = !*rule.defaultFloating;
     }
@@ -1720,10 +1722,11 @@ namespace umbriel {
 
     updateForeignIdentity();
     updateForeignState();
-    const std::optional<bool> deferredActivation = std::exchange(m_deferredActivationCompositorIssued, std::nullopt);
+    const std::optional<bool> deferredActivation = std::exchange(m_deferredActivationTrusted, std::nullopt);
     const bool activateOnMap = deferredActivation.has_value()
         && rule.focusOnActivate.value_or(*deferredActivation || config().general.focusOnActivate);
-    const bool focusOnMap = deferredActivation.has_value() ? activateOnMap : rule.defaultFocused.value_or(true);
+    const bool focusOnMap =
+        activateOnMap || (!deferredActivation.value_or(false) && rule.defaultFocused.value_or(true));
     if (!m_server->sessionLocked() && focusOnMap) {
       m_server->focusView(this, activateOnMap ? FocusReason::XdgActivation : FocusReason::Startup);
     } else if (deferredActivation.has_value()) {
@@ -1878,6 +1881,9 @@ namespace umbriel {
     m_initialRules = {};
     m_initialRulesXdgTag.clear();
     m_initialRulesContentType = ContentType::None;
+    m_namedScrollingColumnName.reset();
+    m_namedScrollingColumnOrder.reset();
+    m_ownsNamedScrollingColumnWidth = false;
     m_ruleOpacity = 1.0F;
     m_hasMaximizeRestoreBox = false;
     m_floating.clearSizeRequest();
@@ -1886,11 +1892,11 @@ namespace umbriel {
     }
   }
 
-  void View::deferActivation(bool compositorIssued) {
-    // A compositor-issued launch request wins if clients race multiple tokens during role creation. An ordinary
-    // client request must not downgrade it before the first buffer arrives.
-    if (compositorIssued || !m_deferredActivationCompositorIssued.has_value()) {
-      m_deferredActivationCompositorIssued = compositorIssued;
+  void View::deferActivation(bool trusted) {
+    // A trusted launch request wins if clients race multiple tokens during role creation. An untrusted request must
+    // not downgrade it before the first buffer arrives.
+    if (trusted || !m_deferredActivationTrusted.has_value()) {
+      m_deferredActivationTrusted = trusted;
     }
   }
 
@@ -2009,8 +2015,16 @@ namespace umbriel {
         const Layout& layout = target != nullptr ? target->layout() : *fallbackLayout;
 
         Layout::InitialSize initial;
+        const std::optional<Layout::InitialSize> namedScrollingColumnInitial =
+            target != nullptr && rule.defaultScrollingColumn
+            ? target->initialNamedScrollingColumnSize(
+                  this, usable, *rule.defaultScrollingColumn, rule.defaultScrollingColumnOrder, wantMaximized
+              )
+            : std::nullopt;
         if (wantMaximizeToEdges) {
           initial = {.width = usable.width, .height = usable.height};
+        } else if (namedScrollingColumnInitial) {
+          initial = *namedScrollingColumnInitial;
         } else if (wantMaximized && target != nullptr) {
           initial = target->initialMaximizedSize(this, usable);
         } else {
@@ -2018,7 +2032,9 @@ namespace umbriel {
           initial = layout.initialSize(usable, widthFraction, target != nullptr ? target->focusedView() : nullptr);
         }
         const XdgSizeHints hints = xdgSizeHints(m_toplevel);
-        const int requestedWidth = (rule.defaultSize && !wantMaximized) ? (*rule.defaultSize)[0] : initial.width;
+        const int requestedWidth = (rule.defaultSize && !wantMaximized && !namedScrollingColumnInitial)
+            ? (*rule.defaultSize)[0]
+            : initial.width;
         const int width =
             (requestedWidth > 0 && !wantMaximizeToEdges) ? clampXdgWidth(requestedWidth, hints) : requestedWidth;
         const int height =
@@ -2743,6 +2759,21 @@ namespace umbriel {
         m_borderFocusedState
     );
 
+    const bool namedScrollingColumnNameChanged = rule.defaultScrollingColumn.has_value()
+        && rule.defaultScrollingColumn != initiallyApplied.defaultScrollingColumn;
+    const bool namedScrollingColumnOrderChanged = rule.defaultScrollingColumn.has_value()
+        && rule.defaultScrollingColumnOrder != initiallyApplied.defaultScrollingColumnOrder;
+    std::optional<Workspace::NamedScrollingColumnChange> namedScrollingColumnChange;
+    if (namedScrollingColumnNameChanged) {
+      namedScrollingColumnChange = Workspace::NamedScrollingColumnChange::Name;
+    } else if (namedScrollingColumnOrderChanged) {
+      namedScrollingColumnChange = Workspace::NamedScrollingColumnChange::Order;
+    }
+    if (namedScrollingColumnChange) {
+      m_namedScrollingColumnName = rule.defaultScrollingColumn;
+      m_namedScrollingColumnOrder = rule.defaultScrollingColumnOrder;
+    }
+
     // Identity can arrive after map. Apply a newly selected one-shot value, but
     // never replay a value already applied at map over the user's later state.
     if (changedInitialRule(rule.defaultFloating, initiallyApplied.defaultFloating)) {
@@ -2756,11 +2787,25 @@ namespace umbriel {
         && (rule.defaultOutput != initiallyApplied.defaultOutput
             || rule.defaultWorkspace != initiallyApplied.defaultWorkspace);
     if (placementChanged && m_workspace != nullptr) {
+      const bool wasActivated = m_activated;
       WorkspaceGroup* targetGroup = windowRuleWorkspaceGroup(*m_server, rule, m_workspace->group());
       Workspace* target = windowRuleWorkspace(targetGroup, rule);
       if (target != nullptr && target != m_workspace) {
-        setWorkspace(target);
+        setWorkspace(target, false);
+        if (m_workspace == target) {
+          target->layoutAttach(this, rule.defaultWidth);
+          if (m_tiled && m_toplevel->scheduled.maximized && !m_maximizedToEdges) {
+            setMaximized(true);
+          }
+          if (wasActivated) {
+            m_server->focusView(this);
+          }
+        }
       }
+    }
+
+    if (namedScrollingColumnChange && m_workspace != nullptr) {
+      m_workspace->applyNamedScrollingColumnRule(this, rule.defaultWidth, *namedScrollingColumnChange);
     }
 
     if (changedInitialRule(rule.defaultPinned, initiallyApplied.defaultPinned)) {
@@ -2768,7 +2813,22 @@ namespace umbriel {
     }
 
     ScrollingLayout* scrolling = m_workspace != nullptr ? m_workspace->scrollingLayout() : nullptr;
-    if (changedInitialRule(rule.defaultWidth, initiallyApplied.defaultWidth) && m_tiled && scrolling != nullptr) {
+    const bool defaultWidthChanged = changedInitialRule(rule.defaultWidth, initiallyApplied.defaultWidth);
+    const bool ownsNamedScrollingColumnWidth =
+        m_displacedHome ? m_displacedHome->ownsNamedScrollingColumnWidth : m_ownsNamedScrollingColumnWidth;
+    if (defaultWidthChanged
+        && m_tiled
+        && m_namedScrollingColumnName
+        && m_displacedHome
+        && ownsNamedScrollingColumnWidth) {
+      m_displacedHome->pendingNamedScrollingColumnWidth = rule.defaultWidth;
+    }
+    const bool canResizeCurrentNamedScrollingColumn =
+        ownsNamedScrollingColumnWidth && (!m_displacedHome || m_ownsNamedScrollingColumnWidth);
+    if (defaultWidthChanged
+        && m_tiled
+        && scrolling != nullptr
+        && (!m_namedScrollingColumnName || canResizeCurrentNamedScrollingColumn)) {
       const int column = scrolling->columnOf(this);
       if (column >= 0) {
         scrolling->setWidthFraction(column, *rule.defaultWidth);

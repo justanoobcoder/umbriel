@@ -64,6 +64,10 @@ namespace umbriel {
     [[nodiscard]] bool onActiveWorkspace() const { return m_onActiveWorkspace; }
     [[nodiscard]] bool tiled() const { return m_tiled; }
     [[nodiscard]] bool floating() const { return !m_tiled; }
+    [[nodiscard]] const std::optional<std::string>& namedScrollingColumnName() const {
+      return m_namedScrollingColumnName;
+    }
+    [[nodiscard]] std::optional<int> namedScrollingColumnOrder() const { return m_namedScrollingColumnOrder; }
     [[nodiscard]] bool pinned() const { return m_pinned; }
     // True while an unfullscreen configure with size 0x0 is unacknowledged;
     // Workspace::arrange must not impose the column size yet.
@@ -100,7 +104,7 @@ namespace umbriel {
     void setUrgent(bool urgent);
     // Activation can arrive after the XDG role exists but before its first buffer. Preserve its provenance until map,
     // when the window's final metadata is available for rule matching.
-    void deferActivation(bool compositorIssued);
+    void deferActivation(bool trusted);
     // Focus ring only. Public alongside setForeignActivated because both are
     // activation chrome the focus manager drives from outside.
     void setBorderFocused(bool focused);
@@ -118,6 +122,10 @@ namespace umbriel {
       std::string workspaceName;
       std::shared_ptr<const LayoutSnapshot> layoutSnapshot;
       LayoutMemberId layoutMember = 0;
+      bool ownsNamedScrollingColumnWidth = false;
+      // A late owner width can settle while this window is temporarily attached
+      // to another output. Replay it after restoring the captured home layout.
+      std::optional<double> pendingNamedScrollingColumnWidth;
       std::optional<LayoutMode> layoutModeOverride;
       // Position relative to the full logical output. Unlike the ordinary
       // usable-area memory, this stays stable while a returning panel has not
@@ -220,6 +228,7 @@ namespace umbriel {
     friend class Server;
     friend class Popup;
     friend class Overview;
+    friend class Workspace;
 
     struct ViewSurfaceWatch {
       View* view = nullptr;
@@ -373,6 +382,11 @@ namespace umbriel {
     ResolvedWindowRule m_initialRules;
     std::string m_initialRulesXdgTag;
     ContentType m_initialRulesContentType = ContentType::None;
+    std::optional<std::string> m_namedScrollingColumnName;
+    std::optional<int> m_namedScrollingColumnOrder;
+    // True for the member that created its current named scrolling column.
+    // Its own late width rule still applies after peers have joined.
+    bool m_ownsNamedScrollingColumnWidth = false;
 
     Server* m_server = nullptr;
     wlr_xdg_toplevel* m_toplevel = nullptr;
@@ -429,10 +443,9 @@ namespace umbriel {
     bool m_scratchpadBorder = false;
     bool m_urgent = false;
     bool m_activated = false;
-    // nullopt means no pre-map request, false means mark urgent, true means focus after map.
-    // False represents an ordinary client token, true a compositor-issued launch token. A trusted request wins if
-    // both arrive before map. Window-rule policy is deliberately resolved only after the window maps.
-    std::optional<bool> m_deferredActivationCompositorIssued;
+    // nullopt means no pre-map request, false means untrusted, true means trusted. A trusted request wins if both
+    // arrive before map. Window-rule policy is deliberately resolved only after the window maps.
+    std::optional<bool> m_deferredActivationTrusted;
     AnimatedValue m_posX;
     AnimatedValue m_posY;
     AnimatedValue m_fade;

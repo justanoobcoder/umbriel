@@ -243,6 +243,8 @@ namespace umbriel {
     std::optional<double> defaultWidth;  // column width fraction override
     std::optional<double> defaultHeight; // floating height fraction of the usable area
     std::optional<int> defaultWorkspace; // 1-64
+    std::optional<std::string> defaultScrollingColumn;
+    std::optional<int> defaultScrollingColumnOrder;
     std::optional<bool> defaultFullscreen;
     std::optional<bool> defaultMaximizeToEdges;
     std::optional<bool> defaultMaximize;
@@ -275,6 +277,8 @@ namespace umbriel {
           && defaultWidth == other.defaultWidth
           && defaultHeight == other.defaultHeight
           && defaultWorkspace == other.defaultWorkspace
+          && defaultScrollingColumn == other.defaultScrollingColumn
+          && defaultScrollingColumnOrder == other.defaultScrollingColumnOrder
           && defaultFullscreen == other.defaultFullscreen
           && defaultMaximizeToEdges == other.defaultMaximizeToEdges
           && defaultMaximize == other.defaultMaximize
@@ -301,6 +305,8 @@ namespace umbriel {
     std::optional<double> defaultWidth;
     std::optional<double> defaultHeight;
     std::optional<int> defaultWorkspace;
+    std::optional<std::string> defaultScrollingColumn;
+    std::optional<int> defaultScrollingColumnOrder;
     std::optional<bool> defaultFullscreen;
     std::optional<bool> defaultMaximizeToEdges;
     std::optional<bool> defaultMaximize;
@@ -346,7 +352,7 @@ namespace umbriel {
 
   struct Config {
     struct Colors {
-      std::array<float, 4> background{0.0784314F, 0.0784314F, 0.0980392F, 0.9411765F};
+      std::array<float, 4> background{0.0784314F, 0.0784314F, 0.0980392F, 1.0F};
       std::array<float, 4> textPrimary{0.9098039F, 0.9098039F, 0.9176471F, 1.0F};
       std::array<float, 4> textMuted{0.5411765F, 0.5411765F, 0.5725490F, 1.0F};
       std::array<float, 4> accentPrimary{0.4784314F, 0.6392157F, 1.0F, 1.0F};
