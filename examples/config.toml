@@ -28,6 +28,11 @@ honor_restored_maximize = false # let apps restore their saved maximized state
 # GTK_THEME = "Adwaita:dark"
 # QT_QPA_PLATFORMTHEME = "qt5ct"
 
+# Defines commands that are executed when the laptop lid is closed or opened.
+# [events]
+# lid_close = "notify-send 'The laptop lid is closed!'"
+# lid_open = "notify-send 'The laptop lid is open!'"
+
 [workspaces]
 back_and_forth = false
 empty_above = false
@@ -141,6 +146,7 @@ color = "#0000007F"
 
 [overview]
 zoom = 0.5                     # 0.1-0.75
+# Pinned windows stay hidden until overview closes; visible scratchpads are dismissed.
 # background_blur = true        # blur the wallpaper while the overview is open
 # background_tint = "#10101430"
 # workspace_background = "#00000044" # set alpha to FF for an opaque background
@@ -178,6 +184,14 @@ mode = "scrolling"             # "scrolling", "dwindle", or "master"
 gap = 8                        # 0-500
 width_presets = [0.333, 0.5, 0.667] # width and height cycling, tiled and floating alike
 
+[layout.struts]
+# Signed logical pixels around normal tiled layouts, applied after panels.
+# Negative values expand the tiled area beyond those bounds.
+left = 0                       # -65535 to 65535
+right = 0
+top = 0
+bottom = 0
+
 [layout.scrolling]
 # Vertical workspaces stack horizontal lanes from top to bottom.
 # direction = "horizontal"
@@ -200,11 +214,15 @@ new_on_top = true             # place new windows at the top of the stack
 # name = "chat"
 # layout.mode = "dwindle"
 # layout.gap = 4
+# layout.struts.top = 24       # override one edge and inherit the others
 # layout.scrolling.center_underfull_strip = false
 # layout.dwindle.preserve_split = true
 
 # Outputs (see docs/user/outputs.md) ----------------------------------------
 
+# Named by connector, or by the `Config name` printed by `umbriel outputs`.
+# The monitor form follows the display between machines and ports:
+# [output."Some Make Some Model ABC123"]
 # [output."DP-1"]
 # mode = "2560x1440@144"
 # position = [0, 0]             # logical top-left; omit for automatic placement
@@ -241,6 +259,7 @@ tap = true                      # enabled by default; false disables tap-to-clic
 # sensitivity = 0.5             # pointer speed, -1.0 to 1.0
 # scroll_factor = 1.5           # touchpad scroll speed, 0.1 to 10.0
 # disable_while_typing = true   # omitted preserves the device's libinput default
+# disable_on_external_mouse = true  # disable the touchpad while an external mouse is connected
 
 [input.mouse]
 # natural_scroll = false
@@ -311,6 +330,8 @@ follows_mouse = false
 "Mod+O" = "overview-toggle"
 # "Mod+Space" is taken above; pick a free chord for layout switching.
 # "Mod+Shift+K" = "keyboard-layout-next"
+# Drag a scrolling workspace directly along its configured axis.
+# "Mod+MouseMiddle" = "layout-scroll-drag"
 # Submaps can nest; entry binds should not repeat. Inspect the active layer with `umbriel submap`.
 # "Mod+R" = { action = "submap:resize", repeat = false }
 # Omit `submap` to add no post-action transition, or set it to "reset" to exit after the action.
@@ -400,6 +421,13 @@ default_size = [1020, 900]
 match.app_id = "^dev.noctalia.UmbrielSharePicker$"
 default_floating = true
 default_size = [800, 600]
+
+# Browsers do not expose a semantic PiP role or control global window position.
+[[window_rule]]
+match.title = "^(Picture-in-Picture|Picture in picture)$"
+default_floating = true
+default_maximize = false
+default_position = { x = 20, y = 20, anchor = "bottom_right" }
 
 # Size a float as fractions of the usable area instead of pixels, so the rule
 # suits any monitor. default_size wins on both axes when it is also set.

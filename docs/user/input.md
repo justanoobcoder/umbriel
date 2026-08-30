@@ -102,6 +102,7 @@ natural_scroll = true
 # sensitivity = 0.5           # -1.0 to 1.0
 # scroll_factor = 1.5         # touchpad scroll speed, 0.1 to 10.0
 # disable_while_typing = true
+# disable_on_external_mouse = true
 ```
 
 Tap-to-click is enabled by default. Set `tap = false` to disable it globally,
@@ -130,6 +131,15 @@ remains unset by default (identity, `1.0`) and takes the next scroll event on
 reload. It applies only to the continuous scroll delta: discrete notches,
 overview wheel stepping, and three-finger-swipe strip travel keep their own
 counting semantics.
+
+Set `disable_on_external_mouse = true` to disable the touchpad while an
+external mouse is connected. Libinput re-enables it automatically once the
+mouse is unplugged. Detection is handled by libinput itself, so this only
+works in a native session because a nested session has no libinput devices to
+configure. Unlike `tap` and `disable_while_typing`, this option has no
+`[[input.device]]` per-device override. If a device doesn't support the mode,
+an explicitly configured value is ignored and a warning is logged; removing
+the key on reload restores the device's default.
 
 ### Mouse
 
@@ -208,7 +218,7 @@ compositor-wide because they are not properties of one physical input device.
 ```toml
 [input.tablet]
 enabled = true                 # false disables the tablet and its pads
-map_to_output = "DP-1"         # confine the tablet area to one monitor
+map_to_output = "DP-1"         # connector or monitor Config name
 map_to_focused_output = false
 map_to_focused_window = false  # pen area = focused window
 left_handed = false

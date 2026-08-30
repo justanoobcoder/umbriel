@@ -97,8 +97,8 @@ documented below.
 dynamic output. They change layout settings but do not create workspaces.
 
 Each rule selects a workspace by exactly one of `name` (string) or `index`
-(1-based integer from 1 to 64). An optional `output` restricts the rule to that
-output.
+(1-based integer from 1 to 64). An optional `output` restricts the rule to a
+case-insensitive connector or monitor name from `umbriel outputs`.
 
 ### How settings are combined
 
@@ -111,15 +111,19 @@ Workspace layout settings are applied in this order:
 Later steps take precedence. On dynamic outputs, rules match workspace names
 and numbered positions as those workspaces are created or removed.
 
+Strut edges are resolved independently. A rule that sets only
+`layout.struts.top` inherits the other three edges from earlier steps.
+
 ### Available fields
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `name` | string | Select by workspace name (mutually exclusive with `index`). |
 | `index` | int | Select by 1-based position from 1 to 64 (mutually exclusive with `name`). |
-| `output` | string | Restrict to this output. |
+| `output` | string | Restrict to a connector or monitor name. |
 | `layout.mode` | string | `"scrolling"`, `"dwindle"`, or `"master"`. |
 | `layout.gap` | int | Gap in pixels (0-500). |
+| `layout.struts.{left,right,top,bottom}` | int | Signed logical pixels reserved at each edge of the normal tiled layout (-65535 to 65535). Positive values shrink the area and negative values expand it. |
 | `layout.width_presets` | float array | Fractions used by the width-cycle and height-cycle actions in every layout. |
 | `layout.scrolling.default_width_fraction` | float | Optional initial scrolling lane extent (0.1-1.0). When omitted globally and for the workspace, the client chooses its initial logical extent. |
 | `layout.scrolling.center_underfull_strip` | bool | Center the complete strip whenever it is narrower than the viewport. Disable to left-align underfull strips. |
@@ -157,5 +161,6 @@ layout.mode = "dwindle"
 index = 4
 output = "DP-1"
 layout.gap = 0
+layout.struts.top = 24
 layout.scrolling.default_width_fraction = 0.667
 ```

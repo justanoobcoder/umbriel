@@ -278,7 +278,26 @@ namespace umbriel {
               override != nullptr && override->tap ? "input.device.tap" : "input.touchpad.tap", deviceName(device)
           );
         }
-
+        if ((libinput_device_config_send_events_get_modes(libinputDevice)
+             & LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE)
+            != 0) {
+          const auto sendEventsMode = input.touchpad.disableOnExternalMouse.value_or(
+                                          libinput_device_config_send_events_get_default_mode(libinputDevice)
+                                          == LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE
+                                      )
+              ? LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE
+              : LIBINPUT_CONFIG_SEND_EVENTS_ENABLED;
+          if (libinput_device_config_send_events_set_mode(libinputDevice, sendEventsMode)
+              != LIBINPUT_CONFIG_STATUS_SUCCESS) {
+            kLog.warn("input: failed to apply input.touchpad.disable_on_external_mouse to '{}'", deviceName(device));
+          }
+        } else if (input.touchpad.disableOnExternalMouse) {
+          kLog.warn(
+              "input: could not apply input.touchpad.disable_on_external_mouse to '{}': device does not support "
+              "disabling on external mouse",
+              deviceName(device)
+          );
+        }
         const bool hasDwtOverride = override != nullptr && override->disableWhileTyping.has_value();
         const std::optional<bool>& dwt =
             hasDwtOverride ? override->disableWhileTyping : input.touchpad.disableWhileTyping;
@@ -595,6 +614,9 @@ namespace umbriel {
       break;
     case WLR_INPUT_DEVICE_TABLET_PAD:
       self->addTabletPad(device);
+      break;
+    case WLR_INPUT_DEVICE_SWITCH:
+      self->addSwitch(device);
       break;
     default:
       break;
@@ -1221,6 +1243,50 @@ namespace umbriel {
       return entry.get() == watch;
     });
     server->updateSeatCapabilities();
+  }
+
+  void Server::addSwitch(wlr_input_device* device) {
+    auto entry = std::make_unique<SwitchDevice>();
+    entry->server = this;
+    entry->device = device;
+    entry->destroy.notify = onSwitchDestroy;
+    wl_signal_add(&device->events.destroy, &entry->destroy);
+    entry->toggle.notify = onSwitchToggle;
+    wl_signal_add(&wlr_switch_from_input_device(device)->events.toggle, &entry->toggle);
+    m_switchDevices.push_back(std::move(entry));
+    kLog.info("input: added switch device '{}'", deviceName(device));
+  }
+
+  void Server::onSwitchDestroy(wl_listener* listener, void* /*data*/) {
+    SwitchDevice* watch;
+    watch = wl_container_of(listener, watch, destroy);
+    Server* server = watch->server;
+    wl_list_remove(&watch->destroy.link);
+    wl_list_remove(&watch->toggle.link);
+    std::erase_if(server->m_switchDevices, [watch](const std::unique_ptr<SwitchDevice>& entry) {
+      return entry.get() == watch;
+    });
+  }
+
+  void Server::onSwitchToggle(wl_listener* listener, void* data) {
+    SwitchDevice* watch;
+    watch = wl_container_of(listener, watch, toggle);
+    const auto* event = static_cast<wlr_switch_toggle_event*>(data);
+    if (event->switch_type != WLR_SWITCH_TYPE_LID) {
+      return;
+    }
+    Server* server = watch->server;
+    if (event->switch_state == WLR_SWITCH_STATE_ON) {
+      kLog.info("lid closed");
+      if (!config().events.lidClose.empty()) {
+        server->spawn(config().events.lidClose.c_str(), "events.lid_close");
+      }
+    } else {
+      kLog.info("lid opened");
+      if (!config().events.lidOpen.empty()) {
+        server->spawn(config().events.lidOpen.c_str(), "events.lid_open");
+      }
+    }
   }
 
   void Server::addTablet(wlr_input_device* device) {

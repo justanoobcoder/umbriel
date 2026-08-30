@@ -5,6 +5,7 @@
 #include "input/seat.h"
 #include "layout/scrolling.h"
 #include "output/direction.h"
+#include "output/identity.h"
 #include "output/output.h"
 #include "overview/overview.h"
 #include "scene/cheatsheet.h"
@@ -361,7 +362,7 @@ namespace umbriel {
       bool changed = false;
       for (const auto& output : server.outputs()) {
         const char* name = output->wlr()->name;
-        if (!requested.empty() && (name == nullptr || requested != name)) {
+        if (!requested.empty() && outputNameMatch(output->identity(), requested) == OutputNameMatch::None) {
           continue;
         }
         found = true;
@@ -521,6 +522,17 @@ namespace umbriel {
       const auto maxScroll = static_cast<double>(scrolling->maxScroll(viewportPrimary));
       scrolling->setScroll(std::clamp(scrolling->scroll() + Sign * step, 0.0, maxScroll));
       workspace->markArrange();
+    }
+
+    bool actionLayoutScrollDrag(Server& /*server*/, const Keybind& bind, std::string* error) {
+      if (bind.mouseButton == 0) {
+        if (error != nullptr) {
+          *error = "layout-scroll-drag requires a mouse-button binding";
+        }
+        return false;
+      }
+      // Cursor owns the motion and release portion of this press-triggered action.
+      return true;
     }
 
     template <int Direction> bool actionFocusAdjacent(Server& server, const Keybind& bind, std::string* /*error*/) {
@@ -1377,6 +1389,7 @@ namespace umbriel {
         &actionWindowMoveToWorkspaceAdjacent<-1>,
         &actionConfigReload,
         &actionKeyboardLayoutNext,
+        &actionLayoutScrollDrag,
         &actionLayoutScroll<-1>,
         &actionLayoutScroll<1>,
         &actionLayoutScroll<-1>,

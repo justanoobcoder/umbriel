@@ -44,6 +44,7 @@ namespace umbriel {
   struct WorkspaceLayoutOverrides {
     std::optional<LayoutMode> mode;
     std::optional<int> gap;
+    LayoutStrutOverrides struts;
     std::optional<std::vector<double>> widthPresets;
     struct Scrolling {
       std::optional<double> defaultWidthFraction;
@@ -80,6 +81,7 @@ namespace umbriel {
   struct ResolvedLayoutConfig {
     LayoutMode mode = LayoutMode::Scrolling;
     int gap = 8;
+    LayoutStruts struts;
     std::vector<double> widthPresets{1.0 / 3, 0.5, 2.0 / 3};
     struct Scrolling {
       std::optional<double> defaultWidthFraction;
@@ -517,6 +519,7 @@ namespace umbriel {
     struct Layout {
       LayoutMode mode = LayoutMode::Scrolling;
       int gap = 8;
+      LayoutStruts struts;
       std::vector<double> widthPresets{1.0 / 3, 0.5, 2.0 / 3};
       struct Scrolling {
         std::optional<double> defaultWidthFraction;
@@ -573,6 +576,12 @@ namespace umbriel {
       bool operator==(const Environment&) const = default;
     } environment;
 
+    struct Events {
+      std::string lidClose;
+      std::string lidOpen;
+      bool operator==(const Events&) const = default;
+    } events;
+
     struct Input {
       // Advertise and accept the primary-selection clipboard used for
       // middle-click paste.
@@ -601,6 +610,7 @@ namespace umbriel {
         std::optional<double> sensitivity;
         std::optional<double> scrollFactor;
         std::optional<bool> disableWhileTyping;
+        std::optional<bool> disableOnExternalMouse;
         bool operator==(const Touchpad&) const = default;
       } touchpad;
 

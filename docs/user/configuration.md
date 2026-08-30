@@ -38,6 +38,9 @@ expands to your home directory, and `$VAR` or `${VAR}` expands environment
 variables. Later files override earlier files, and values in the main file
 override every include.
 
+`files` is the only key `[include]` accepts. Anything else in the section is
+reported as an unknown key, in the main config and in included files alike.
+
 You can split your config into multiple files for clarity:
 
 ```toml
@@ -104,6 +107,16 @@ section cannot override `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, `DISPLAY`,
 reload does not update environments already captured by running processes.
 Restart Umbriel after changing it, then fully quit and relaunch long-running
 applications such as Steam if they survived the session restart.
+
+## Events
+
+```toml
+[events]
+lid_close = "notify-send 'The laptop lid is closed!'"
+lid_open = "notify-send 'The laptop lid is open!'"
+```
+
+Defines commands that are executed when the laptop lid is closed or opened.
 
 ## Idle inhibition
 

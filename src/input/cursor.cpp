@@ -2,6 +2,7 @@
 
 #include "config/config.h"
 #include "core/log.h"
+#include "input/gestures.h"
 #include "input/seat.h"
 #include "layer/layer_surface.h"
 #include "layout/drop_target.h"
@@ -499,7 +500,17 @@ namespace umbriel {
         return;
       }
       Layout& layout = workspace->layout();
-      const uint32_t resolvedEdges = layout.resolveResizeEdges(view, edges, m_cursor->x, m_cursor->y);
+      uint32_t resolvedEdges = 0;
+      if (edges != 0) {
+        resolvedEdges = layout.resolveResizeEdges(view, edges, m_cursor->x, m_cursor->y);
+      } else {
+        const wlr_box presented = workspace->presentedTiledBox(view);
+        const wlr_box visible = workspace->usableArea();
+        wlr_box reachable{};
+        if (wlr_box_intersection(&reachable, &presented, &visible)) {
+          resolvedEdges = layout.sanitizeResizeEdges(view, resizeEdgesForPoint(reachable, m_cursor->x, m_cursor->y));
+        }
+      }
       if (resolvedEdges == 0) {
         if (workspace->focusedView() == view) {
           workspace->ensureFocusedVisible();
@@ -512,7 +523,7 @@ namespace umbriel {
       if (view->maximizedToEdges()) {
         view->setMaximizedToEdges(false);
       }
-      const wlr_box usable = workspace->group()->output()->usableArea();
+      const wlr_box usable = workspace->tiledArea();
       std::unique_ptr<ResizeGrab> session = layout.beginResize(view, resolvedEdges, usable);
       if (session == nullptr) {
         refreshInteractiveCursor();
@@ -580,6 +591,9 @@ namespace umbriel {
   void Cursor::resetMode() {
     m_server->hideInsertHint();
     View* view = grabbedView();
+    if (std::holds_alternative<ScrollDragGrab>(m_grab)) {
+      m_server->gestures()->endPointerScroll(true, 0);
+    }
     const bool restoreDragPresentation = std::holds_alternative<FloatingMoveGrab>(m_grab)
         || (std::get_if<TiledMoveGrab>(&m_grab) != nullptr && !std::get<TiledMoveGrab>(m_grab).pending);
     if (std::holds_alternative<FloatingResizeGrab>(m_grab) && view != nullptr) {
@@ -737,6 +751,18 @@ namespace umbriel {
         }
       }
       if (bound.has_value()) {
+        if (bound->action == KeybindAction::LayoutScrollDrag && m_server->gestures()->beginPointerScroll()) {
+          setActiveConstraint(nullptr);
+          m_grab = ScrollDragGrab{
+              .button = button,
+              .lastX = m_cursor->x,
+              .lastY = m_cursor->y,
+          };
+          m_moveButton = button;
+          setCompositorCursor("grabbing");
+          wlr_seat_pointer_clear_focus(m_server->seat()->wlr());
+          return;
+        }
         m_swallowedButtons.push_back(button);
         return;
       }
@@ -763,6 +789,20 @@ namespace umbriel {
         m_swallowedButtons.push_back(button);
       }
       return;
+    }
+
+    if (state == WL_POINTER_BUTTON_STATE_RELEASED) {
+      if (auto* grab = std::get_if<ScrollDragGrab>(&m_grab)) {
+        if (button == grab->button) {
+          m_server->gestures()->endPointerScroll(m_server->sessionLocked(), timeMsec);
+          resetMode();
+          // The grab cleared client focus on press and consumed every motion.
+          // Re-run hit testing so hover/focus is correct without requiring the
+          // user to jiggle the mouse after release.
+          processMotion(timeMsec, m_cursor->x, m_cursor->y);
+        }
+        return;
+      }
     }
 
     // Overview owns the pointer while it is up: cards are its own hit-test surface and the desktop underneath is inert.
@@ -1129,6 +1169,17 @@ namespace umbriel {
 
   void Cursor::processMotion(uint32_t timeMsec, double oldX, double oldY, bool allowFocusChange) {
     updateHotCorner();
+    if (auto* grab = std::get_if<ScrollDragGrab>(&m_grab)) {
+      if (m_server->sessionLocked()) {
+        m_server->gestures()->endPointerScroll(true, timeMsec);
+        resetMode();
+      } else {
+        m_server->gestures()->updatePointerScroll(m_cursor->x - grab->lastX, m_cursor->y - grab->lastY, timeMsec);
+        grab->lastX = m_cursor->x;
+        grab->lastY = m_cursor->y;
+      }
+      return;
+    }
     // Overview owns motion: cards follow a drag, panels keep passthrough, and
     // the inert desktop underneath never receives enter/motion or hover focus.
     if (Overview* overview = m_server->overview(); overview != nullptr
@@ -1804,21 +1855,26 @@ namespace umbriel {
     if (view->workspace() == nullptr) {
       return 0;
     }
-    const wlr_box box = view->workspace()->layout().targetBox(view);
+    Workspace* workspace = view->workspace();
+    const wlr_box box = workspace->presentedTiledBox(view);
     if (box.width <= 0 || box.height <= 0) {
       return 0;
     }
-    uint32_t edges = view->workspace()->layout().resizeEdgesAt(view, m_cursor->x, m_cursor->y);
+    wlr_box reachable = box;
+    if (workspace->group() != nullptr && workspace->group()->output() != nullptr) {
+      const wlr_box usable = workspace->usableArea();
+      if (!wlr_box_intersection(&reachable, &box, &usable)) {
+        return 0;
+      }
+    }
+    uint32_t edges =
+        workspace->layout().sanitizeResizeEdges(view, resizeEdgesForPoint(reachable, m_cursor->x, m_cursor->y));
     // Advertise an edge that extends past the output from the reachable
     // output boundary, since the pointer cannot approach the real edge.
-    wlr_box usable = box;
-    if (view->workspace()->group() != nullptr && view->workspace()->group()->output() != nullptr) {
-      usable = view->workspace()->group()->output()->usableArea();
-    }
-    const double left = std::max<double>(box.x, usable.x);
-    const double right = std::min<double>(box.x + box.width, usable.x + usable.width);
-    const double top = std::max<double>(box.y, usable.y);
-    const double bottom = std::min<double>(box.y + box.height, usable.y + usable.height);
+    const double left = reachable.x;
+    const double right = reachable.x + reachable.width;
+    const double top = reachable.y;
+    const double bottom = reachable.y + reachable.height;
     if ((edges & (WLR_EDGE_LEFT | WLR_EDGE_RIGHT)) != 0) {
       const double dist = (edges & WLR_EDGE_LEFT) != 0 ? std::abs(m_cursor->x - left) : std::abs(m_cursor->x - right);
       if (dist > kHoverSlop) {
@@ -1932,7 +1988,7 @@ namespace umbriel {
       resetMode();
       return;
     }
-    const wlr_box usable = grab->workspace->group()->output()->usableArea();
+    const wlr_box usable = grab->workspace->tiledArea();
     grab->session->applyDelta(m_cursor->x - grab->startX, m_cursor->y - grab->startY, usable);
     wlr_xdg_toplevel_set_maximized(grab->view->toplevel(), false);
     grab->workspace->markArrange(false);

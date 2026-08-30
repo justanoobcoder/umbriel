@@ -215,6 +215,47 @@ UMBRIEL_TEST(dwindlePreserveSplitDefaultsToFalse) {
   CHECK(!store.config().layout.dwindle.preserveSplit);
 }
 
+UMBRIEL_TEST(layoutStrutsLoadGloballyAndPerWorkspace) {
+  const TempConfig file;
+  file.write(R"(
+[layout.struts]
+left = -12
+right = 24
+top = 36
+bottom = -48
+surprise = 1
+
+[output.DP-1]
+workspaces = ["dev"]
+
+[[workspace]]
+name = "dev"
+
+[workspace.layout.struts]
+left = 50
+bottom = -8
+)");
+
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+  const umbriel::ConfigReloadResult result = store.reload();
+
+  CHECK(result.success);
+  CHECK_EQ(store.config().layout.struts.left, -12);
+  CHECK_EQ(store.config().layout.struts.right, 24);
+  CHECK_EQ(store.config().layout.struts.top, 36);
+  CHECK_EQ(store.config().layout.struts.bottom, -48);
+  CHECK_EQ(store.config().workspaceRules.size(), size_t{1});
+  const auto& overrides = store.config().workspaceRules[0].layout.struts;
+  CHECK(overrides.left.has_value());
+  CHECK_EQ(*overrides.left, 50);
+  CHECK(!overrides.right.has_value());
+  CHECK(!overrides.top.has_value());
+  CHECK(overrides.bottom.has_value());
+  CHECK_EQ(*overrides.bottom, -8);
+  CHECK(containsDiagnostic(store, "unknown key layout.struts.surprise"));
+}
+
 UMBRIEL_TEST(masterLayoutReadersLoadGlobalAndWorkspaceSettings) {
   const TempConfig file;
   file.write(R"(
@@ -510,6 +551,23 @@ UMBRIEL_TEST(middleClickPasteLoadsAndDefaultsEnabled) {
   file.write("[input]\n");
   CHECK(store.reload().success);
   CHECK(store.config().input.middleClickPaste);
+}
+
+UMBRIEL_TEST(outputNamesDifferingOnlyByCaseAreRejectedAsDuplicates) {
+  const TempConfig file;
+  file.write(R"(
+[output.DP-1]
+scale = 1.5
+
+[output.dp-1]
+scale = 2.0
+)");
+
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+  CHECK(store.reload().success);
+  CHECK_EQ(store.config().outputs.size(), size_t{1});
+  CHECK(containsDiagnostic(store, "duplicate output section"));
 }
 
 UMBRIEL_TEST(outputVrrPolicyLoadsAndDefaultsDisabled) {
@@ -850,6 +908,23 @@ UMBRIEL_TEST(missingIncludesRemainPendingUntilTheyLoad) {
   CHECK_EQ(store.config().colors.accentPrimary[0], 18.0F / 255.0F);
 }
 
+UMBRIEL_TEST(unknownIncludeKeysAreReported) {
+  // The merge erases `include` before the config readers run, so the merge is the only place that can report a typo in
+  // this section. Every file's own `include` table is checked, not just the root's.
+  const TempConfig file;
+  file.write("[include]\nfiles = [\"" + file.includeName() + "\"]\ndirs = [\"themes\"]\n");
+  file.writeInclude("[include]\npaths = []\n");
+
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+  const umbriel::ConfigReloadResult loaded = store.reload();
+
+  CHECK(loaded.success);
+  CHECK(containsDiagnostic(store, "unknown key include.dirs"));
+  CHECK(containsDiagnostic(store, "unknown key include.paths"));
+  CHECK(!containsDiagnostic(store, "unknown key include.files"));
+}
+
 UMBRIEL_TEST(mainFileOverridesIncludedFiles) {
   // Noctalia's rendered theme lands in an include file; the user's root config must win on conflicts while still
   // picking up keys the include alone provides. This is what lets users override generated theme colors.
@@ -946,6 +1021,7 @@ accel_profile = "adaptive"
 sensitivity = 0.1
 scroll_factor = 1.5
 disable_while_typing = true
+disable_on_external_mouse = true
 
 [input.mouse]
 accel_profile = "custom 0.2 0.0 0.5 1.0 2.0"
@@ -990,6 +1066,7 @@ sensitivity = -0.5
   CHECK(input.touchpad.sensitivity == std::optional<double>(0.1));
   CHECK(input.touchpad.scrollFactor == std::optional<double>(1.5));
   CHECK(input.touchpad.disableWhileTyping == std::optional<bool>(true));
+  CHECK(input.touchpad.disableOnExternalMouse == std::optional<bool>(true));
   CHECK_EQ(input.devices.size(), size_t{3});
 
   const auto* keyboard = input.findDevice("Acme Split Keyboard");
@@ -1046,6 +1123,11 @@ UMBRIEL_TEST(touchpadScrollFactorDefaultsToUnset) {
 UMBRIEL_TEST(touchpadDisableWhileTypingDefaultsToUnset) {
   const umbriel::Config defaults;
   CHECK(!defaults.input.touchpad.disableWhileTyping.has_value());
+}
+
+UMBRIEL_TEST(touchpadDisableOnExternalMouseDefaultsToUnset) {
+  const umbriel::Config defaults;
+  CHECK(!defaults.input.touchpad.disableOnExternalMouse.has_value());
 }
 
 UMBRIEL_TEST(touchpadTapDefaultsToEnabled) {
@@ -1342,6 +1424,24 @@ WAYLAND_DISPLAY = "wrong"
   CHECK(containsDiagnostic(store, "ignoring environment.WAYLAND_DISPLAY (reserved by Umbriel)"));
   CHECK(!containsDiagnostic(store, "unknown key environment.DXVK_HDR"));
   CHECK(!containsDiagnostic(store, "unknown key environment._PRIVATE"));
+}
+
+UMBRIEL_TEST(eventsLoadCanonicalLidCommands) {
+  const TempConfig file;
+  file.write(R"(
+[events]
+lid_close = "systemctl suspend"
+lid_open = "notify-send awake"
+)");
+
+  ConfigStore& store = umbriel::configStore();
+  store.setRootPath(file.path(), true);
+  const umbriel::ConfigReloadResult result = store.reload();
+
+  CHECK(result.success);
+  CHECK_EQ(store.config().events.lidClose, std::string{"systemctl suspend"});
+  CHECK_EQ(store.config().events.lidOpen, std::string{"notify-send awake"});
+  CHECK(store.diagnostics().empty());
 }
 
 UMBRIEL_TEST(packagedAnimationDefaultsMatchCompiledDefaults) {

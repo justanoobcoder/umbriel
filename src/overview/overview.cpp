@@ -24,12 +24,14 @@
 #include <xkbcommon/xkbcommon.h>
 #include "wlr.h"
 // clang-format on
+#include "workspace/scratchpad.h"
 #include "workspace/workspace.h"
 
 namespace umbriel {
 
   namespace {
     constexpr Logger kLog("overview");
+    constexpr double kMiddleScrollStepPx = 105.0;
 
     // Gap between workspace thumbnails, as a fraction of the scaled row height.
     constexpr double kRowGapFraction = 0.1;
@@ -532,6 +534,9 @@ namespace umbriel {
   }
 
   Overview::Card* Overview::createCard(OutputState& state, View* view, size_t row) {
+    if (view == nullptr || !view->mapped() || view->pinned()) {
+      return nullptr;
+    }
     wlr_surface* surface = view->toplevel()->base->surface;
     if (surface == nullptr) {
       return nullptr;
@@ -946,7 +951,7 @@ namespace umbriel {
       // layer split so overlapping cards stack the way the real windows do.
       for (int pass = 0; pass < 3; ++pass) {
         for (View* view : workspace->allViews()) {
-          if (view == nullptr || !view->mapped()) {
+          if (view == nullptr || !view->mapped() || view->pinned()) {
             continue;
           }
           const bool fullscreen = view->toplevel()->current.fullscreen;
@@ -1029,6 +1034,10 @@ namespace umbriel {
       return false;
     }
 
+    if (ScratchpadManager* scratchpad = m_server->scratchpadManager()) {
+      scratchpad->hideAll();
+    }
+
     m_active = true;
     m_closing = false;
     m_progress = 0.0;
@@ -1052,6 +1061,8 @@ namespace umbriel {
 
     wlr_scene_node_set_enabled(&m_server->xdgTree()->node, false);
     wlr_scene_node_set_enabled(&m_server->fullscreenTree()->node, false);
+    wlr_scene_node_set_enabled(&m_server->pinnedShadowTree()->node, false);
+    wlr_scene_node_set_enabled(&m_server->pinnedTree()->node, false);
     wlr_scene_node_set_enabled(&m_tree->node, true);
 
     m_server->clearKeyboardFocus();
@@ -1069,6 +1080,9 @@ namespace umbriel {
 
   void Overview::open() {
     if (m_active) {
+      if (ScratchpadManager* scratchpad = m_server->scratchpadManager()) {
+        scratchpad->hideAll();
+      }
       m_closing = false;
       m_pendingFocus = nullptr;
       if (m_progress < 1.0 || m_targetProgress < 1.0) {
@@ -1119,6 +1133,7 @@ namespace umbriel {
     hideDropHint();
     m_pressCard = nullptr;
     m_pressWorkspace = nullptr;
+    clearMiddlePress();
     m_pendingFocus = focus;
     for (const auto& state : m_outputs) {
       WorkspaceGroup* group = state->output->workspaceGroup();
@@ -1214,6 +1229,7 @@ namespace umbriel {
   }
 
   void Overview::teardown() {
+    clearMiddlePress();
     if (m_dropHint != nullptr) {
       m_dropHint->hideImmediate();
     }
@@ -1241,6 +1257,8 @@ namespace umbriel {
     }
     wlr_scene_node_set_enabled(&m_server->xdgTree()->node, true);
     wlr_scene_node_set_enabled(&m_server->fullscreenTree()->node, true);
+    wlr_scene_node_set_enabled(&m_server->pinnedShadowTree()->node, true);
+    wlr_scene_node_set_enabled(&m_server->pinnedTree()->node, true);
 
     m_active = false;
     m_closing = false;
@@ -1293,7 +1311,7 @@ namespace umbriel {
   // -: hooks
 
   void Overview::onViewMapped(View* view) {
-    if (!m_active || view == nullptr || !view->mapped()) {
+    if (!m_active || view == nullptr || !view->mapped() || view->pinned()) {
       return;
     }
     Workspace* workspace = view->workspace();
@@ -1303,6 +1321,50 @@ namespace umbriel {
     }
     if (createCard(*state, view, workspace->index()) == nullptr) {
       return;
+    }
+    assignShortcuts();
+  }
+
+  void Overview::onViewPinnedChanged(View* view) {
+    if (!m_active || view == nullptr || !view->mapped()) {
+      return;
+    }
+    Card* card = findCard(view);
+    OutputState* state = card != nullptr ? card->owner : stateForWorkspace(view->workspace());
+    if (view->pinned()) {
+      if (card == nullptr) {
+        return;
+      }
+      if (m_pressCard == card) {
+        m_pressCard = nullptr;
+      }
+      if (m_middlePressCard == card) {
+        clearMiddlePress();
+      }
+      if (m_drop.view == view) {
+        m_drop.view = nullptr;
+        m_drop.edge = 0;
+        hideDropHint();
+      }
+      if (m_dragCard == card) {
+        hideDropHint();
+        m_dragCard = nullptr;
+        m_dragSourceWorkspace = nullptr;
+        m_dragSourceWidth.reset();
+        m_drop = {};
+        m_dropWorkspaceGroup = nullptr;
+        m_server->cursor()->overrideCursor(nullptr);
+      }
+      std::erase_if(m_shortcutAssignments, [view](const ShortcutAssignment& assignment) {
+        return assignment.view == view;
+      });
+      dropCard(view);
+    } else if (card == nullptr && state != nullptr && view->workspace() != nullptr) {
+      createCard(*state, view, view->workspace()->index());
+    }
+    if (state != nullptr) {
+      layoutOutput(*state);
+      wlr_output_schedule_frame(state->output->wlr());
     }
     assignShortcuts();
   }
@@ -1319,6 +1381,9 @@ namespace umbriel {
     }
     if (m_pressCard != nullptr && m_pressCard->view == view) {
       m_pressCard = nullptr;
+    }
+    if (m_middlePressCard != nullptr && m_middlePressCard->view == view) {
+      m_middlePressCard = nullptr;
     }
     if (m_drop.view == view) {
       m_drop.view = nullptr;
@@ -1366,6 +1431,10 @@ namespace umbriel {
     if (!m_active || view == nullptr || !view->mapped()) {
       return;
     }
+    if (view->pinned()) {
+      onViewPinnedChanged(view);
+      return;
+    }
 
     Card* card = findCard(view);
     Workspace* workspace = view->workspace();
@@ -1384,6 +1453,9 @@ namespace umbriel {
     if (target == nullptr) {
       if (m_pressCard == card) {
         m_pressCard = nullptr;
+      }
+      if (m_middlePressCard == card) {
+        m_middlePressCard = nullptr;
       }
       dropCard(view);
       if (source != nullptr) {
@@ -1523,6 +1595,9 @@ namespace umbriel {
     }
     if (m_pressCard != nullptr && m_pressCard->owner == it->get()) {
       m_pressCard = nullptr;
+    }
+    if (m_middleOutput == output) {
+      clearMiddlePress();
     }
     for (const auto& card : (*it)->cards) {
       destroyCard(card.get());
@@ -1680,6 +1755,17 @@ namespace umbriel {
     return output->workspaceGroup()->active();
   }
 
+  void Overview::clearMiddlePress() {
+    if (m_middleDragging) {
+      m_server->cursor()->overrideCursor(nullptr);
+    }
+    m_middlePressCard = nullptr;
+    m_middleOutput = nullptr;
+    m_middlePressed = false;
+    m_middleDragging = false;
+    m_middleAccumY = 0;
+  }
+
   // -: input
 
   bool Overview::handleButton(uint32_t button, bool pressed, double lx, double ly) {
@@ -1688,6 +1774,15 @@ namespace umbriel {
     }
 
     if (!pressed) {
+      if (button == BTN_MIDDLE) {
+        Card* card = m_middlePressCard;
+        const bool closeCard = m_middlePressed && !m_middleDragging;
+        clearMiddlePress();
+        if (closeCard && card != nullptr && card->view != nullptr && card->view->mapped()) {
+          wlr_xdg_toplevel_send_close(card->view->toplevel());
+        }
+        return true;
+      }
       if (button != BTN_LEFT) {
         return true;
       }
@@ -1709,9 +1804,15 @@ namespace umbriel {
 
     Card* card = cardAt(lx, ly);
     if (button == BTN_MIDDLE) {
-      if (card != nullptr && card->view != nullptr) {
-        wlr_xdg_toplevel_send_close(card->view->toplevel());
-      }
+      m_middlePressCard = card;
+      Workspace* workspace =
+          card != nullptr && card->view != nullptr ? card->view->workspace() : rowAt(lx, ly, nullptr, nullptr, false);
+      m_middleOutput = workspace != nullptr && workspace->group() != nullptr ? workspace->group()->output() : nullptr;
+      m_middlePressX = lx;
+      m_middlePressY = ly;
+      m_middleAccumY = 0;
+      m_middlePressed = true;
+      m_middleDragging = false;
       return true;
     }
     if (button != BTN_LEFT) {
@@ -1730,6 +1831,30 @@ namespace umbriel {
 
   void Overview::handleMotion(double lx, double ly) {
     if (!interactive()) {
+      return;
+    }
+    if (m_middlePressed) {
+      if (!m_middleDragging) {
+        const double dx = lx - m_middlePressX;
+        const double dy = ly - m_middlePressY;
+        if (dx * dx + dy * dy < kDragThreshold * kDragThreshold) {
+          return;
+        }
+        m_middleDragging = true;
+        m_middleAccumY = 0;
+        m_middlePressY = ly;
+        m_server->cursor()->overrideCursor("grabbing");
+      }
+      m_middleAccumY += ly - m_middlePressY;
+      m_middlePressY = ly;
+      while (m_middleAccumY <= -kMiddleScrollStepPx) {
+        m_middleAccumY += kMiddleScrollStepPx;
+        selectRelativeWorkspace(1, m_middleOutput);
+      }
+      while (m_middleAccumY >= kMiddleScrollStepPx) {
+        m_middleAccumY -= kMiddleScrollStepPx;
+        selectRelativeWorkspace(-1, m_middleOutput);
+      }
       return;
     }
     if (m_dragCard != nullptr) {

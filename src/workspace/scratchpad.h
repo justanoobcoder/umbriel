@@ -31,6 +31,7 @@ namespace umbriel {
     [[nodiscard]] bool contains(const View* view) const;
     [[nodiscard]] bool moveToScratchpad(View* view, Output* output);
     bool toggle(Output* output);
+    void hideAll();
     bool restoreFocused(Output* output);
     bool focusNext(Output* output);
     [[nodiscard]] View* focused(Output* output) const;
@@ -59,9 +60,9 @@ namespace umbriel {
       bool lastFocused = false;
     };
 
-    void setVisible(Output* output, bool visible);
+    void setVisible(Output* output, bool visible, bool animateTransition = true);
     // Retarget the backdrop dim/blur fade for `output` and refresh its scene nodes.
-    void retargetBackdrop(Output* output, bool visible);
+    void retargetBackdrop(Output* output, bool visible, bool animateTransition = true);
     wlr_scene_rect* dimRectFor(Output* output);
     wlr_scene_blur* blurNodeFor(Output* output);
     void updateDimAndBlur(Output* output);

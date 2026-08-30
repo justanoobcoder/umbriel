@@ -27,6 +27,7 @@ UMBRIEL_TEST(aFirstLoadReportsEverything) {
   CHECK(change.appearance);
   CHECK(change.animation);
   CHECK(change.colors);
+  CHECK(change.events);
   CHECK(change.input);
   CHECK(change.outputs);
 }
@@ -93,6 +94,12 @@ UMBRIEL_TEST(eachSectionIsReportedOnItsOwn) {
   }
   {
     Config after;
+    after.input.touchpad.disableOnExternalMouse = true;
+    CHECK(ConfigChange::between(before, after).input);
+    CHECK(ConfigEffects::between(before, after).input);
+  }
+  {
+    Config after;
     after.input.middleClickPaste = !after.input.middleClickPaste;
     const ConfigChange change = ConfigChange::between(before, after);
     CHECK(change.input);
@@ -112,6 +119,15 @@ UMBRIEL_TEST(eachSectionIsReportedOnItsOwn) {
     const ConfigChange change = ConfigChange::between(before, after);
     CHECK(change.general);
     CHECK(!change.input);
+  }
+  {
+    Config after;
+    after.events.lidClose = "systemctl suspend";
+    const ConfigChange change = ConfigChange::between(before, after);
+    CHECK(change.events);
+    CHECK(!change.general);
+    CHECK(!change.input);
+    CHECK_EQ(change.summary(), std::string("events"));
   }
   {
     Config after;
@@ -332,6 +348,36 @@ UMBRIEL_TEST(layoutGapDoesNotReapplyOutputState) {
   CHECK(!effects.viewChrome);
 }
 
+UMBRIEL_TEST(layoutStrutsOnlyRefreshWorkspaceLayout) {
+  const Config before;
+  Config after;
+  after.layout.struts.left = 32;
+  after.layout.struts.bottom = -8;
+
+  const ConfigEffects effects = ConfigEffects::between(before, after);
+  CHECK(effects.workspaceLayout);
+  CHECK(!effects.outputState);
+  CHECK(!effects.workspaceInventory);
+  CHECK(!effects.viewChrome);
+  CHECK(!effects.layerEffects);
+}
+
+UMBRIEL_TEST(workspaceRuleStrutsOnlyRefreshWorkspaceLayout) {
+  Config before;
+  umbriel::WorkspaceConfig rule;
+  rule.name = "dev";
+  before.workspaceRules.push_back(rule);
+  Config after = before;
+  after.workspaceRules[0].layout.struts.left = 24;
+
+  const ConfigEffects effects = ConfigEffects::between(before, after);
+  CHECK(effects.workspaceLayout);
+  CHECK(!effects.outputState);
+  CHECK(!effects.workspaceInventory);
+  CHECK(!effects.viewChrome);
+  CHECK(!effects.layerEffects);
+}
+
 UMBRIEL_TEST(outputStateAndWorkspaceInventoryAreIndependent) {
   Config before;
   OutputRule original;
@@ -380,6 +426,32 @@ UMBRIEL_TEST(outputStateAndWorkspaceInventoryAreIndependent) {
   const ConfigEffects reenableEffects = ConfigEffects::between(disabled, before);
   CHECK(reenableEffects.outputState);
   CHECK(!reenableEffects.workspaceInventory);
+}
+UMBRIEL_TEST(outputRuleNameSetChangesRefreshIdentityDependentEffects) {
+  Config before;
+  OutputRule connector;
+  connector.name = "HDMI-A-1";
+  before.outputs.push_back(connector);
+
+  Config descriptorAdded = before;
+  OutputRule descriptor;
+  descriptor.name = "Microstep MSI G2712F CD6T084401192";
+  descriptorAdded.outputs.push_back(descriptor);
+  const ConfigEffects added = ConfigEffects::between(before, descriptorAdded);
+  CHECK(added.outputState);
+  CHECK(added.tearingPolicy);
+  CHECK(added.directScanoutPolicy);
+  CHECK(added.workspaceInventory);
+  CHECK(added.workspaceLayout);
+
+  Config caseOnly = before;
+  caseOnly.outputs[0].name = "hdmi-a-1";
+  const ConfigEffects caseEffects = ConfigEffects::between(before, caseOnly);
+  CHECK(!caseEffects.outputState);
+  CHECK(!caseEffects.tearingPolicy);
+  CHECK(!caseEffects.directScanoutPolicy);
+  CHECK(!caseEffects.workspaceInventory);
+  CHECK(!caseEffects.workspaceLayout);
 }
 
 UMBRIEL_TEST(tearingPolicyDoesNotReapplyOutputStateOrInvalidateOverview) {
@@ -458,11 +530,11 @@ UMBRIEL_TEST(directScanoutPolicyForcesOnlyItsRuntimeEffect) {
   CHECK(enableEffects.directScanoutPolicy);
   CHECK(!enableEffects.outputState);
 
-  Config unrelatedOutput = before;
+  Config additionalOutput = before;
   OutputRule second;
   second.name = "DP-1";
-  unrelatedOutput.outputs.push_back(second);
-  CHECK(!ConfigEffects::between(before, unrelatedOutput).directScanoutPolicy);
+  additionalOutput.outputs.push_back(second);
+  CHECK(ConfigEffects::between(before, additionalOutput).directScanoutPolicy);
 
   Config onlyDisabled;
   onlyDisabled.outputs.push_back(disabled.outputs[0]);
@@ -470,7 +542,7 @@ UMBRIEL_TEST(directScanoutPolicyForcesOnlyItsRuntimeEffect) {
 
   Config onlyDefault;
   onlyDefault.outputs.push_back(before.outputs[0]);
-  CHECK(!ConfigEffects::between(onlyDefault, Config{}).directScanoutPolicy);
+  CHECK(ConfigEffects::between(onlyDefault, Config{}).directScanoutPolicy);
 }
 
 UMBRIEL_TEST(vrrPolicyTracksFullscreenOnlyWhenRequested) {

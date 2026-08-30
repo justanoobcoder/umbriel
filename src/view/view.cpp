@@ -2013,12 +2013,14 @@ namespace umbriel {
           fallbackLayout->setConfig(&globalConfig);
         }
         const Layout& layout = target != nullptr ? target->layout() : *fallbackLayout;
+        const wlr_box tiledArea =
+            target != nullptr ? target->tiledArea() : applyLayoutStruts(usable, globalConfig.struts);
 
         Layout::InitialSize initial;
         const std::optional<Layout::InitialSize> namedScrollingColumnInitial =
             target != nullptr && rule.defaultScrollingColumn
             ? target->initialNamedScrollingColumnSize(
-                  this, usable, *rule.defaultScrollingColumn, rule.defaultScrollingColumnOrder, wantMaximized
+                  this, tiledArea, *rule.defaultScrollingColumn, rule.defaultScrollingColumnOrder, wantMaximized
               )
             : std::nullopt;
         if (wantMaximizeToEdges) {
@@ -2026,10 +2028,10 @@ namespace umbriel {
         } else if (namedScrollingColumnInitial) {
           initial = *namedScrollingColumnInitial;
         } else if (wantMaximized && target != nullptr) {
-          initial = target->initialMaximizedSize(this, usable);
+          initial = target->initialMaximizedSize(this, tiledArea);
         } else {
           const std::optional<double> widthFraction = wantMaximized ? std::optional<double>(1.0) : rule.defaultWidth;
-          initial = layout.initialSize(usable, widthFraction, target != nullptr ? target->focusedView() : nullptr);
+          initial = layout.initialSize(tiledArea, widthFraction, target != nullptr ? target->focusedView() : nullptr);
         }
         const XdgSizeHints hints = xdgSizeHints(m_toplevel);
         const int requestedWidth = (rule.defaultSize && !wantMaximized && !namedScrollingColumnInitial)
@@ -2436,6 +2438,9 @@ namespace umbriel {
       if (m_workspace != nullptr && m_workspace->group() != nullptr && m_workspace->group()->output() != nullptr) {
         wlr_output_schedule_frame(m_workspace->group()->output()->wlr());
       }
+      if (Overview* overview = m_server->overview(); overview != nullptr && overview->active()) {
+        overview->onViewPinnedChanged(this);
+      }
       if (focus) {
         m_server->focusView(this);
       }
@@ -2447,6 +2452,9 @@ namespace umbriel {
     m_pinned = false;
     if (restoreTiled) {
       setFloating(false, focus);
+      if (Overview* overview = m_server->overview(); overview != nullptr && overview->active()) {
+        overview->onViewPinnedChanged(this);
+      }
       return;
     }
     if (m_workspace != nullptr) {
@@ -2457,6 +2465,9 @@ namespace umbriel {
       m_workspace->syncViewPresentation(this);
     }
     setNodeEnabled(m_onActiveWorkspace);
+    if (Overview* overview = m_server->overview(); overview != nullptr && overview->active()) {
+      overview->onViewPinnedChanged(this);
+    }
   }
 
   void View::setFloating(bool floating, bool focus) {
@@ -2481,7 +2492,8 @@ namespace umbriel {
     if (m_maximizedToEdges) {
       setMaximizedToEdges(false);
     }
-    if (!floating && m_pinned) {
+    const bool unpinning = !floating && m_pinned;
+    if (unpinning) {
       m_pinned = false;
       m_restoreTiledAfterUnpin = false;
       if (m_workspace != nullptr) {
@@ -2633,6 +2645,11 @@ namespace umbriel {
       m_workspace->markArrange(false);
     }
     updateForeignState();
+    if (unpinning) {
+      if (Overview* overview = m_server->overview(); overview != nullptr && overview->active()) {
+        overview->onViewPinnedChanged(this);
+      }
+    }
   }
 
   void View::setFullscreen(bool fullscreen) {
@@ -2662,8 +2679,9 @@ namespace umbriel {
     if (!fullscreen) {
       m_refullscreenOnTile = false;
     }
+    const bool unpinning = fullscreen && m_pinned;
     if (fullscreen) {
-      if (m_pinned) {
+      if (unpinning) {
         m_pinned = false;
         m_restoreTiledAfterUnpin = false;
         if (m_workspace != nullptr) {
@@ -2745,6 +2763,11 @@ namespace umbriel {
       Output* output = m_workspace->group()->output();
       output->updateVrr();
       output->updateHdr();
+    }
+    if (unpinning) {
+      if (Overview* overview = m_server->overview(); overview != nullptr && overview->active()) {
+        overview->onViewPinnedChanged(this);
+      }
     }
   }
 

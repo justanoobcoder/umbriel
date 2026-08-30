@@ -20,7 +20,7 @@ lists every available action. See [Keybinds](keybinds.md) for binding syntax.
 | `window-focus:<window-id>` | Window id from `umbriel windows` | `"window-focus:0123abcd"` |
 | `window-focus-warp:<window-id>` | Focus the window and warp the cursor to its visible center | `"window-focus-warp:0123abcd"` |
 | `window-close[:<window-id>]` | Optional window id; bare form closes the focused window | `"window-close"` |
-| `dpms-off[:<output>]` / `dpms-on[:<output>]` | Optional connector name; bare form targets every configured output | `"dpms-off:DP-1"`, `"dpms-on"` |
+| `dpms-off[:<output>]` / `dpms-on[:<output>]` | Optional connector or monitor name; bare form targets every configured output | `"dpms-off:DP-1"`, `"dpms-on"` |
 | `session-quit[:skip-confirmation]` | Bare form opens an on-screen confirmation (Enter or the quit bind confirms; any other key or click cancels); `skip-confirmation` quits immediately | `"session-quit:skip-confirmation"` |
 
 `spawn:` exports a one-shot `XDG_ACTIVATION_TOKEN` and matching
@@ -160,20 +160,25 @@ focus-only, while `window-focus-warp:<id>` always moves it.
   rather than reverting to the pre-maximize box. Fullscreen owns the size
   outright, so the actions do nothing while a float is fullscreen.
 - **Fullscreen:** `window-toggle-fullscreen`. Toggle fullscreen for the focused
-  window.
+  window. Fullscreen ignores layout struts and layer-shell exclusive zones and
+  fills the entire output.
 - **Maximize:** `window-toggle-maximize`. Toggle the focused column's full-width
-  state. A floating window has no column, so it toggles filling the output's
-  usable area and restores the box it had before.
+  state. Tiled columns remain inside configured struts and gaps. A floating
+  window has no column, so it fills the output's usable area and restores the
+  box it had before.
 - **Window to usable-area edges:** `window-toggle-maximize-to-edges`. Toggle
-  maximization without gaps or borders. Layer-shell exclusive zones remain
-  visible. A column's full-width restore state is preserved when this is toggled
-  or when fullscreen is entered and left.
+  maximization without layout struts, gaps, or borders. Layer-shell exclusive
+  zones remain visible. A column's full-width restore state is preserved when
+  this is toggled or when fullscreen is entered and left.
 - **Center a column:** `column-center`. Center the focused column in the
   scrolling viewport. It requires the scrolling layout; elsewhere its keybind
   does nothing and the IPC `msg` command reports an error.
 - **Scroll the viewport:** `layout-scroll-left`, `layout-scroll-right`. Scroll
   the active workspace's scrolling-layout viewport. `layout-scroll-up` and
   `layout-scroll-down` are first-class synonyms for left and right.
+- **Drag the viewport:** `layout-scroll-drag`. Bind this to a modified mouse
+  button to pan the active scrolling layout until that button is released.
+  Horizontal and vertical scrolling layouts follow their respective axes.
 
 ### Configuration
 
@@ -207,8 +212,9 @@ window with the opposite floating state.
 
 `window-toggle-pinned` makes the focused window float and keeps it above
 fullscreen windows on its output. Pinned windows remain visible when you
-switch workspaces. You cannot pin a fullscreen window, and making a pinned
-window fullscreen removes its pinned state.
+switch workspaces. The overview temporarily hides them, then restores them when
+it closes. You cannot pin a fullscreen window, and making a pinned window
+fullscreen removes its pinned state.
 
 ## Output and movement actions
 

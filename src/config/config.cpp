@@ -8,6 +8,7 @@
 #include "config/store.h"
 #include "config/value_parse.h"
 #include "core/log.h"
+#include "output/identity.h"
 #include "umbriel_build_config.h"
 
 // clang-format off
@@ -381,6 +382,14 @@ namespace umbriel {
       return parsed;
     }
 
+    template <typename Struts> void readLayoutStruts(Section& section, Struts& struts) {
+      constexpr int kStrutLimit = 65535;
+      section.integer("left", -kStrutLimit, kStrutLimit, struts.left)
+          .integer("right", -kStrutLimit, kStrutLimit, struts.right)
+          .integer("top", -kStrutLimit, kStrutLimit, struts.top)
+          .integer("bottom", -kStrutLimit, kStrutLimit, struts.bottom);
+    }
+
     void readWorkspaceLayoutOverrides(
         const toml::table& section, std::string_view context, WorkspaceLayoutOverrides& overrides
     ) {
@@ -392,6 +401,7 @@ namespace umbriel {
               overrides.mode = mode;
             }
             s.integer("gap", 0, 500, overrides.gap);
+            s.sub("struts", [&](Section& struts) { readLayoutStruts(struts, overrides.struts); });
             if (auto presets = readWidthPresets(s, layoutContext)) {
               overrides.widthPresets = std::move(*presets);
             }
@@ -924,6 +934,7 @@ namespace umbriel {
           loaded.layout.mode = *mode;
         }
         s.integer("gap", 0, 500, loaded.layout.gap);
+        s.sub("struts", [&](Section& struts) { readLayoutStruts(struts, loaded.layout.struts); });
         if (auto presets = readWidthPresets(s, "layout")) {
           loaded.layout.widthPresets = std::move(*presets);
         }
@@ -1012,6 +1023,12 @@ namespace umbriel {
           parsed.emplace_back(std::string(key.str()), *entry);
         }
         loaded.environment.variables = std::move(parsed);
+      });
+    }
+
+    void readEvents(Section& root, Config& loaded) {
+      root.sub("events", [&](Section& s) {
+        s.text("lid_close", loaded.events.lidClose).text("lid_open", loaded.events.lidOpen);
       });
     }
 
@@ -1167,7 +1184,8 @@ namespace umbriel {
               .boolean("natural_scroll", in.touchpad.naturalScroll)
               .real("sensitivity", -1.0, 1.0, in.touchpad.sensitivity)
               .real("scroll_factor", 0.1, 10.0, in.touchpad.scrollFactor)
-              .boolean("disable_while_typing", in.touchpad.disableWhileTyping);
+              .boolean("disable_while_typing", in.touchpad.disableWhileTyping)
+              .boolean("disable_on_external_mouse", in.touchpad.disableOnExternalMouse);
           in.touchpad.accelProfile = readAccelProfile(t, "accel_profile", "input.touchpad");
         });
         s.sub("mouse", [&](Section& m) {
@@ -1226,9 +1244,11 @@ namespace umbriel {
         }
         Section keys(*section, "output." + name, configStore().mutableDiagnostics());
 
-        if (std::ranges::any_of(loaded.outputs, [&](const OutputRule& rule) { return rule.name == name; })) {
+        if (std::ranges::any_of(loaded.outputs, [&](const OutputRule& rule) {
+              return outputNamesEqual(rule.name, name);
+            })) {
           warnAt(key.source(), "duplicate output section '{}'", name);
-          std::erase_if(loaded.outputs, [&](const OutputRule& rule) { return rule.name == name; });
+          std::erase_if(loaded.outputs, [&](const OutputRule& rule) { return outputNamesEqual(rule.name, name); });
         }
         OutputRule rule;
         rule.name = name;
@@ -1803,6 +1823,7 @@ namespace umbriel {
           readLayout(root, loaded);
           readGeneral(root, loaded);
           readEnvironment(root, loaded);
+          readEvents(root, loaded);
           readWorkspaceSettings(root, loaded);
           readInput(root, loaded);
           readOutputs(root, loaded);

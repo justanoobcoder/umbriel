@@ -24,6 +24,11 @@ off.
 
 The overview shows every workspace on every output. Press `Mod+O` by default,
 or use one of the [overview actions](actions.md#overview-actions).
+Opening it immediately hides every visible scratchpad. The stored windows
+remain available the next time their scratchpad is shown.
+Pinned windows are hidden for as long as the overview is open and do not appear
+as cards. They return with their pinned state unchanged when the overview
+closes.
 
 Click a window to focus it, middle-click to close it, or drag it to another
 workspace. When a click selects a window in another scrolling column, the
@@ -59,6 +64,11 @@ key. `shortcut_keys` must contain at least two unique, non-space printable ASCII
 characters. Letter uniqueness ignores case, while badges preserve the case
 written in the configuration.
 
+Middle-click still closes a window card, but the close is sent on button
+release. Drag the middle button vertically instead to step through workspace
+rows without using the keyboard; moving beyond the drag threshold suppresses
+the close.
+
 An active client drag takes precedence. Umbriel ignores requests to open the
 overview until the pointer button that initiated the drag is released.
 
@@ -91,4 +101,3 @@ quarter of the badge height so the shape remains a rounded rectangle.
 | `shortcuts`             | bool   | `true`      | Show shortcut badges and accept their plain key sequences.                                      |
 | `shortcut_keys`         | string | `"1234567890"` | Favorite badge keys in preference order.                                                     |
 | `badge_color`          | color  | `colors.accent_primary` | Badge label accent. The keycap background is derived from this color.                                  |
-
