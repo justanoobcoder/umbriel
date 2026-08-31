@@ -1,7 +1,9 @@
 # Actions
 
 Assign actions to keybinds or invoke them through `umbriel msg`; this reference
-lists every available action. See [Keybinds](keybinds.md) for binding syntax.
+lists every available action. See [Keybinds](keybinds.md) for binding syntax and
+[IPC](ipc.md) for the socket behind `umbriel msg`, including the event stream
+that reports what an action changed.
 
 ## Parameterized actions
 
@@ -134,6 +136,8 @@ focus-only, while `window-focus-warp:<id>` always moves it.
   that direction. `window-consume-or-expel-left` and
   `window-consume-or-expel-right` split a window that shares its column into a
   new column in the requested direction, or consume a window that is alone.
+  A window consumed into a scrolling column takes the free space that column
+  already had, so the rows that were there keep their sizes.
   In master layout these actions move between the master and stack areas in
   the requested direction. In dwindle layout they swap with the adjacent
   on-screen neighbor in the requested horizontal direction. Vertically adjacent
@@ -151,11 +155,22 @@ focus-only, while `window-focus-warp:<id>` always moves it.
   direction. In scrolling and master layouts this sizes a row within its
   column or area. In dwindle it adjusts the vertical splits containing the
   window. On a vertical scrolling workspace the stacking axis is horizontal,
-  so these actions change a window's width within its lane.
+  so these actions change a window's width within its lane. In the scrolling
+  layout a window alone in its column is resized from its bottom edge, exactly
+  as dragging that edge does: the top edge stays where it is and the freed
+  space collects below the window, so the next window stacked into that column
+  fills it. A fraction of `1.0` reclaims the space. A window a previous drag
+  pushed against the column's bottom keeps that anchor and frees space above
+  itself instead. In master and dwindle a window with no neighbor on the
+  stacking axis has nothing to trade space with, so the height actions leave it
+  unchanged.
 - **Floating windows:** all of the width and height actions above resize a
   focused floating window directly, as fractions of the output's usable area
   clamped to the client's min/max size hints. Cycling walks
-  `layout.width_presets` on either axis. Resizing a maximized float leaves
+  `layout.width_presets` on either axis, stepping to the next preset that
+  changes the window's pixel size on that axis: a float's size is pixels, so a
+  preset that rounds to the size the window already has is skipped rather than
+  applied as a step that does nothing. Resizing a maximized float leaves
   maximization behind and keeps the new size, so a later toggle maximizes
   rather than reverting to the pre-maximize box. Fullscreen owns the size
   outright, so the actions do nothing while a float is fullscreen.

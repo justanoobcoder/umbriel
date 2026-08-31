@@ -121,11 +121,11 @@ just check 310 -v         # keep the full output of passing checks
 ```
 
 Each check gets its own contained headless compositor, so a failure stays local
-and checks run in any order. A run reports one line per check with its duration;
-passing checks are summarized to a single dimmed line while failing ones print
-their whole output. A failing check keeps its runtime directory (compositor log,
-config, per-client logs) and prints the path. `just verify <mode> [fragment ...]`
-selects another build.
+and checks run in any order. Every passing check emits a concise completion
+message, summarized to a single dimmed line unless `-v` is enabled; failing
+checks print their whole output. A failing check keeps its runtime directory
+(compositor log, config, per-client logs) and prints the path. `just verify
+<mode> [fragment ...]` selects another build.
 
 ## Running
 
@@ -228,8 +228,12 @@ packaged configuration. Home Manager also accepts a raw TOML string or a path. T
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for code style, naming conventions, the dependency stack, and debugging
-helpers. Umbriel shares its conventions with [noctalia](https://github.com/noctalia-dev/noctalia). For general help
-and design discussion, join the community on [Discord](https://discord.noctalia.dev).
+helpers, and [SCOPE.md](SCOPE.md) for what the project takes on and what it declines. Umbriel shares its conventions
+with [noctalia](https://github.com/noctalia-dev/noctalia). For general help and design discussion, join the community
+on [Discord](https://discord.noctalia.dev).
+
+Bug reports are always welcome. Feature requests are read against [SCOPE.md](SCOPE.md), so please skim it before
+opening one, and ask on Discord if you are unsure whether an idea fits.
 
 ## License
 

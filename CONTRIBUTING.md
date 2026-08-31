@@ -5,7 +5,9 @@ This file collects contributor-facing details for Umbriel: design goals, stack n
 and debugging helpers. Umbriel shares its conventions with [noctalia](https://github.com/noctalia-dev/noctalia):
 same team, same style. If in doubt, match what noctalia does.
 
-For dependencies and normal build commands, start with [README.md](README.md).
+For dependencies and normal build commands, start with [README.md](README.md). For what the project accepts and
+declines, read [SCOPE.md](SCOPE.md): it is the reference used when triaging feature requests and unsolicited pull
+requests.
 
 ## Design Principles
 
@@ -201,13 +203,16 @@ umbriel -v | --version            # print the release version and commit revisio
 umbriel validate [-c <config>]   # check a config file without starting
 umbriel outputs                  # list connectors and modes
 umbriel windows                  # list windows (focused *, urgent !)
+umbriel workspaces               # list workspaces and their layouts
+umbriel subscribe <events>       # stream events as JSON lines until closed
 umbriel layers                   # list layer-shell surfaces
 umbriel keyboard-layouts         # list configured keyboard layouts
 umbriel msg --help              # list actions available to `msg` and keybinds
 umbriel msg <action> [args...]   # send an action to the running compositor
 ```
 
-`windows`, `layers`, `keyboard-layouts`, and `msg` accept `--json` / `-j` for machine-readable output.
+`windows`, `workspaces`, `layers`, `keyboard-layouts`, and `msg` accept `--json` / `-j` for machine-readable output.
+`subscribe` is always JSON; see [docs/user/ipc.md](docs/user/ipc.md) for the families and payloads.
 
 ## Commits
 
