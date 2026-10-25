@@ -364,7 +364,9 @@ namespace umbriel {
     }
 
     const wlr_text_input_v3_state& current = m_activeTextInput->current;
-    if ((m_activeTextInput->active_features & WLR_TEXT_INPUT_V3_FEATURE_SURROUNDING_TEXT) != 0) {
+    // Chromium sends surrounding text only in commits after the one that enables the
+    // text input, so active_features (fixed at that commit) never includes it.
+    if ((current.features & WLR_TEXT_INPUT_V3_FEATURE_SURROUNDING_TEXT) != 0) {
       wlr_input_method_v2_send_surrounding_text(
           m_inputMethod, current.surrounding.text, current.surrounding.cursor, current.surrounding.anchor
       );
